@@ -1,0 +1,22 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "dev:fullstack",
+			"type": "shell",
+			"command": "concurrently",
+			"args": [
+				"-k",
+				"-n",
+				"next,socket",
+				"-c",
+				"cyan,magenta",
+				"\"next dev\"",
+				"\"node server.ts\""
+			],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
