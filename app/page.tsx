@@ -1,18 +1,29 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
-import { io, Socket } from "socket.io-client";
+import { useCallback, useEffect, useState, useRef } from "react";
 
-const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:4000";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "";
 
-interface IMessage {
-  room: string;
+interface ChatMessage {
+  id: string;
+  from_user_id: string;
+  to_user_id: string;
   text: string;
-  user: string;
-  time: string;
+  created_at: string;
 }
 
+type WsServerEvent =
+  | { type: "registered"; user_id: string }
+  | { type: "online_users"; users: string[] }
+  | { type: "inbox"; messages: ChatMessage[] }
+  | { type: "new_message"; message: ChatMessage }
+  | { type: "message_queued"; message_id: string; client_message_id?: string }
+  | { type: "ack_result"; removed_count: number }
+  | { type: "error"; message: string };
+
 export default function ChatPage() {
-  const [userId, setUserId] = useState<string>("");
+  const [userId] = useState<string>(
+    () => `User-${Math.floor(Math.random() * 1000)}`,
+  );
 
   useEffect(() => {
     if (userId) {
@@ -23,16 +34,11 @@ export default function ChatPage() {
   }, [userId]);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [targetUser, setTargetUser] = useState<string | null>(null);
-  const [messagesByRoom, setMessagesByRoom] = useState<Record<string, IMessage[]>>({});
+  const [messagesByPeer, setMessagesByPeer] = useState<Record<string, ChatMessage[]>>({});
   const [message, setMessage] = useState("");
-  
-  const socketRef = useRef<Socket | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  useEffect(() => {
-    const newId = `User-${Math.floor(Math.random() * 1000)}`;
-    setUserId(newId);
-  }, []);
+  const socketRef = useRef<WebSocket | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -40,37 +46,90 @@ export default function ChatPage() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messagesByRoom, targetUser]);
+  }, [messagesByPeer, targetUser]);
 
-  // Socket Connection
+  const appendMessage = useCallback((incoming: ChatMessage) => {
+    const peerId = incoming.from_user_id === userId ? incoming.to_user_id : incoming.from_user_id;
+
+    setMessagesByPeer((prev) => {
+      const existing = prev[peerId] || [];
+      if (existing.some((m) => m.id === incoming.id)) {
+        return prev;
+      }
+
+      return {
+        ...prev,
+        [peerId]: [...existing, incoming],
+      };
+    });
+  }, [userId]);
+
+  const sendEvent = (event: object) => {
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(event));
+    }
+  };
+
   useEffect(() => {
     if (!userId) return;
 
-    const socket = io(SOCKET_SERVER_URL);
-    socketRef.current = socket;
+    const ws = new WebSocket(WS_URL);
+    socketRef.current = ws;
 
-    socket.emit("register", userId);
+    ws.onopen = () => {
+      sendEvent({ type: "register", user_id: userId });
+      sendEvent({ type: "get_online_users" });
+    };
 
-    socket.on("connect", () => {
-      console.log("Connected with ID:", socket.id);
-    });
+    ws.onmessage = (ev) => {
+      try {
+        const data = JSON.parse(ev.data) as WsServerEvent;
 
-    socket.on("user_list", (users: string[]) => {
-      setOnlineUsers(users.filter((u) => u !== userId));
-    });
+        if (data.type === "online_users") {
+          setOnlineUsers(data.users.filter((u) => u !== userId));
+          return;
+        }
 
-    socket.on("message", (data: IMessage) => {
-      setMessagesByRoom((prev) => {
-        const room = data.room; 
-        const currentMessages = prev[room] || [];
-        return { ...prev, [room]: [...currentMessages, data] };
-      });
-    });
+        if (data.type === "inbox") {
+          const receivedIds: string[] = [];
+          data.messages.forEach((msg) => {
+            appendMessage(msg);
+            if (msg.to_user_id === userId) {
+              receivedIds.push(msg.id);
+            }
+          });
+
+          if (receivedIds.length > 0) {
+            sendEvent({ type: "ack", message_ids: receivedIds });
+          }
+          return;
+        }
+
+        if (data.type === "new_message") {
+          appendMessage(data.message);
+
+          if (data.message.to_user_id === userId) {
+            sendEvent({ type: "ack", message_ids: [data.message.id] });
+          }
+          return;
+        }
+
+        if (data.type === "error") {
+          console.error("WS error:", data.message);
+        }
+      } catch {
+        console.error("Invalid WS payload", ev.data);
+      }
+    };
+
+    ws.onclose = () => {
+      socketRef.current = null;
+    };
 
     return () => {
-      socket.disconnect();
+      ws.close();
     };
-  }, [userId]);
+  }, [appendMessage, userId]);
 
   const startChat = (otherId: string) => {
     setTargetUser(otherId);
@@ -79,23 +138,28 @@ export default function ChatPage() {
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim() && targetUser && userId) {
-      const roomName = [userId, targetUser].sort().join("-");
-      
-      const msgData = {
-        room: roomName,
-        targetId: targetUser,
-        text: message,
-        user: userId,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const text = message.trim();
+      const localMessage: ChatMessage = {
+        id: `local-${Date.now()}`,
+        from_user_id: userId,
+        to_user_id: targetUser,
+        text,
+        created_at: new Date().toISOString(),
       };
 
-      socketRef.current?.emit("private_message", msgData);
+      appendMessage(localMessage);
+      sendEvent({
+        type: "send_message",
+        to_user_id: targetUser,
+        text,
+        client_message_id: localMessage.id,
+      });
+
       setMessage("");
     }
   };
 
-  const currentRoomId = (userId && targetUser) ? [userId, targetUser].sort().join("-") : "";
-  const currentMessages = messagesByRoom[currentRoomId] || [];
+  const currentMessages = targetUser ? messagesByPeer[targetUser] || [] : [];
 
   if (!userId) {
     return <div className="flex h-screen items-center justify-center bg-gray-900 text-white">Loading Chat...</div>;
@@ -141,12 +205,17 @@ export default function ChatPage() {
                 <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
               )}
               {currentMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.user === userId ? "justify-end" : "justify-start"}`}>
+                <div key={msg.id || i} className={`flex ${msg.from_user_id === userId ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[70%] p-3 rounded-2xl break-words ${
-                    msg.user === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
+                    msg.from_user_id === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
                   }`}>
                     <p className="text-sm">{msg.text}</p>
-                    <p className="text-[10px] mt-1 opacity-50 text-right">{msg.time}</p>
+                    <p className="text-[10px] mt-1 opacity-50 text-right">
+                      {new Date(msg.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
                   </div>
                 </div>
               ))}
