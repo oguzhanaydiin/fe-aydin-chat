@@ -5,10 +5,11 @@ import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/l
 
 interface UseChatSocketOptions {
   userId: string
+  token: string
   wsUrl: string
 }
 
-export function useChatSocket({ userId, wsUrl }: UseChatSocketOptions) {
+export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
 
   const [onlineUsers, setOnlineUsers] = useState<string[]>([])
@@ -71,7 +72,7 @@ export function useChatSocket({ userId, wsUrl }: UseChatSocketOptions) {
   }, [])
 
   const connect = useCallback(() => {
-    if (!userId || !wsUrl) {
+    if (!userId || !token || !wsUrl) {
       setStatus("idle")
       return
     }
@@ -91,7 +92,7 @@ export function useChatSocket({ userId, wsUrl }: UseChatSocketOptions) {
       setIsConnected(true)
       setStatus("open")
 
-      sendEvent({ type: "register", user_id: userId })
+      sendEvent({ type: "register", token })
       sendEvent({ type: "get_online_users" })
     }
 
@@ -152,7 +153,7 @@ export function useChatSocket({ userId, wsUrl }: UseChatSocketOptions) {
         scheduleReconnect()
       }
     }
-  }, [appendMessage, scheduleReconnect, sendEvent, userId, wsUrl])
+  }, [appendMessage, scheduleReconnect, sendEvent, token, userId, wsUrl])
 
   useEffect(() => {
     connectRef.current = connect
