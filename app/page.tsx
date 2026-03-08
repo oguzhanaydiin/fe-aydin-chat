@@ -1,24 +1,8 @@
 "use client";
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef } from "react";
+import { useChatSocket } from "@/hooks/useChatSocket";
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "";
-
-interface ChatMessage {
-  id: string;
-  from_user_id: string;
-  to_user_id: string;
-  text: string;
-  created_at: string;
-}
-
-type WsServerEvent =
-  | { type: "registered"; user_id: string }
-  | { type: "online_users"; users: string[] }
-  | { type: "inbox"; messages: ChatMessage[] }
-  | { type: "new_message"; message: ChatMessage }
-  | { type: "message_queued"; message_id: string; client_message_id?: string }
-  | { type: "ack_result"; removed_count: number }
-  | { type: "error"; message: string };
 
 export default function ChatPage() {
   const [userId] = useState<string>(
@@ -32,13 +16,14 @@ export default function ChatPage() {
       document.title = "Chat";
     }
   }, [userId]);
-  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [targetUser, setTargetUser] = useState<string | null>(null);
-  const [messagesByPeer, setMessagesByPeer] = useState<Record<string, ChatMessage[]>>({});
   const [message, setMessage] = useState("");
-
-  const socketRef = useRef<WebSocket | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage } = useChatSocket({
+    userId,
+    wsUrl: WS_URL,
+  });
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -48,89 +33,6 @@ export default function ChatPage() {
     scrollToBottom();
   }, [messagesByPeer, targetUser]);
 
-  const appendMessage = useCallback((incoming: ChatMessage) => {
-    const peerId = incoming.from_user_id === userId ? incoming.to_user_id : incoming.from_user_id;
-
-    setMessagesByPeer((prev) => {
-      const existing = prev[peerId] || [];
-      if (existing.some((m) => m.id === incoming.id)) {
-        return prev;
-      }
-
-      return {
-        ...prev,
-        [peerId]: [...existing, incoming],
-      };
-    });
-  }, [userId]);
-
-  const sendEvent = (event: object) => {
-    if (socketRef.current?.readyState === WebSocket.OPEN) {
-      socketRef.current.send(JSON.stringify(event));
-    }
-  };
-
-  useEffect(() => {
-    if (!userId) return;
-
-    const ws = new WebSocket(WS_URL);
-    socketRef.current = ws;
-
-    ws.onopen = () => {
-      sendEvent({ type: "register", user_id: userId });
-      sendEvent({ type: "get_online_users" });
-    };
-
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data) as WsServerEvent;
-
-        if (data.type === "online_users") {
-          setOnlineUsers(data.users.filter((u) => u !== userId));
-          return;
-        }
-
-        if (data.type === "inbox") {
-          const receivedIds: string[] = [];
-          data.messages.forEach((msg) => {
-            appendMessage(msg);
-            if (msg.to_user_id === userId) {
-              receivedIds.push(msg.id);
-            }
-          });
-
-          if (receivedIds.length > 0) {
-            sendEvent({ type: "ack", message_ids: receivedIds });
-          }
-          return;
-        }
-
-        if (data.type === "new_message") {
-          appendMessage(data.message);
-
-          if (data.message.to_user_id === userId) {
-            sendEvent({ type: "ack", message_ids: [data.message.id] });
-          }
-          return;
-        }
-
-        if (data.type === "error") {
-          console.error("WS error:", data.message);
-        }
-      } catch {
-        console.error("Invalid WS payload", ev.data);
-      }
-    };
-
-    ws.onclose = () => {
-      socketRef.current = null;
-    };
-
-    return () => {
-      ws.close();
-    };
-  }, [appendMessage, userId]);
-
   const startChat = (otherId: string) => {
     setTargetUser(otherId);
   };
@@ -138,22 +40,7 @@ export default function ChatPage() {
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault();
     if (message.trim() && targetUser && userId) {
-      const text = message.trim();
-      const localMessage: ChatMessage = {
-        id: `local-${Date.now()}`,
-        from_user_id: userId,
-        to_user_id: targetUser,
-        text,
-        created_at: new Date().toISOString(),
-      };
-
-      appendMessage(localMessage);
-      sendEvent({
-        type: "send_message",
-        to_user_id: targetUser,
-        text,
-        client_message_id: localMessage.id,
-      });
+      sendChatMessage(targetUser, message);
 
       setMessage("");
     }
