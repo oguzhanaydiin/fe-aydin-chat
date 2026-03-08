@@ -1,104 +1,255 @@
-"use client";
-import { useEffect, useState, useRef } from "react";
-import { io, Socket } from "socket.io-client";
+"use client"
+import { useEffect, useState, useRef } from "react"
+import { useChatSocket } from "@/hooks/useChatSocket"
+import type { AuthSessionResponse, SendOtpResponse } from "@/lib/chat/types"
 
-const SOCKET_SERVER_URL = process.env.NEXT_PUBLIC_SOCKET_SERVER_URL || "http://localhost:4000";
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://127.0.0.1:8080/ws"
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080"
+const SESSION_STORAGE_KEY = "chat_auth_session"
 
-interface IMessage {
-  room: string;
-  text: string;
-  user: string;
-  time: string;
+type AuthSession = {
+  token: string
+  userId: string
+  email: string
+}
+
+async function requestOtp(email: string): Promise<SendOtpResponse> {
+  const response = await fetch(`${API_URL}/otp/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to send OTP")
+  }
+
+  return (await response.json()) as SendOtpResponse
+}
+
+async function verifyOtp(email: string, otp: string): Promise<AuthSessionResponse> {
+  const response = await fetch(`${API_URL}/otp/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, otp }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to verify OTP")
+  }
+
+  return (await response.json()) as AuthSessionResponse
 }
 
 export default function ChatPage() {
-  const [userId, setUserId] = useState<string>("");
+  const [authSession, setAuthSession] = useState<AuthSession | null>(null)
+  const [emailInput, setEmailInput] = useState("")
+  const [otpInput, setOtpInput] = useState("")
+  const [otpEmail, setOtpEmail] = useState<string | null>(null)
+  const [devOtpHint, setDevOtpHint] = useState<string | null>(null)
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (userId) {
-      document.title = `Chat - ${userId}`;
-    } else {
-      document.title = "Chat";
+    const raw = localStorage.getItem(SESSION_STORAGE_KEY)
+    if (!raw) {
+      return
     }
-  }, [userId]);
-  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
-  const [targetUser, setTargetUser] = useState<string | null>(null);
-  const [messagesByRoom, setMessagesByRoom] = useState<Record<string, IMessage[]>>({});
-  const [message, setMessage] = useState("");
-  
-  const socketRef = useRef<Socket | null>(null);
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+    try {
+      const parsed = JSON.parse(raw) as AuthSession
+      if (parsed.token && parsed.userId && parsed.email) {
+        setAuthSession(parsed)
+      } else {
+        localStorage.removeItem(SESSION_STORAGE_KEY)
+      }
+    } catch {
+      localStorage.removeItem(SESSION_STORAGE_KEY)
+    }
+  }, [])
+
+  const userId = authSession?.userId || ""
+  const token = authSession?.token || ""
 
   useEffect(() => {
-    const newId = `User-${Math.floor(Math.random() * 1000)}`;
-    setUserId(newId);
-  }, []);
+    if (authSession?.userId) {
+      document.title = `Chat - ${authSession.userId}`
+    } else {
+      document.title = "Chat Login"
+    }
+  }, [authSession?.userId])
+
+  const [targetUser, setTargetUser] = useState<string | null>(null)
+  const [message, setMessage] = useState("")
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+
+  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage } = useChatSocket({
+    userId,
+    token,
+    wsUrl: WS_URL,
+  })
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messagesByRoom, targetUser]);
-
-  // Socket Connection
-  useEffect(() => {
-    if (!userId) return;
-
-    const socket = io(SOCKET_SERVER_URL);
-    socketRef.current = socket;
-
-    socket.emit("register", userId);
-
-    socket.on("connect", () => {
-      console.log("Connected with ID:", socket.id);
-    });
-
-    socket.on("user_list", (users: string[]) => {
-      setOnlineUsers(users.filter((u) => u !== userId));
-    });
-
-    socket.on("message", (data: IMessage) => {
-      setMessagesByRoom((prev) => {
-        const room = data.room; 
-        const currentMessages = prev[room] || [];
-        return { ...prev, [room]: [...currentMessages, data] };
-      });
-    });
-
-    return () => {
-      socket.disconnect();
-    };
-  }, [userId]);
+    scrollToBottom()
+  }, [messagesByPeer, targetUser])
 
   const startChat = (otherId: string) => {
-    setTargetUser(otherId);
-  };
+    setTargetUser(otherId)
+  }
 
   const sendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
+    e.preventDefault()
     if (message.trim() && targetUser && userId) {
-      const roomName = [userId, targetUser].sort().join("-");
-      
-      const msgData = {
-        room: roomName,
-        targetId: targetUser,
-        text: message,
-        user: userId,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      };
+      sendChatMessage(targetUser, message)
 
-      socketRef.current?.emit("private_message", msgData);
-      setMessage("");
+      setMessage("")
     }
-  };
+  }
 
-  const currentRoomId = (userId && targetUser) ? [userId, targetUser].sort().join("-") : "";
-  const currentMessages = messagesByRoom[currentRoomId] || [];
+  const currentMessages = targetUser ? messagesByPeer[targetUser] || [] : []
 
-  if (!userId) {
-    return <div className="flex h-screen items-center justify-center bg-gray-900 text-white">Loading Chat...</div>;
+  const onSendOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const email = emailInput.trim().toLowerCase()
+
+    if (!email) {
+      setAuthError("Email is required.")
+      return
+    }
+
+    setAuthLoading(true)
+    setAuthError(null)
+
+    try {
+      const result = await requestOtp(email)
+      setOtpEmail(email)
+      setDevOtpHint(result.otp)
+      setOtpInput("")
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "OTP send error")
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const onVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!otpEmail) {
+      setAuthError("Request OTP with email first.")
+      return
+    }
+
+    const otp = otpInput.trim()
+    if (!otp) {
+      setAuthError("Enter the OTP code.")
+      return
+    }
+
+    setAuthLoading(true)
+    setAuthError(null)
+
+    try {
+      const result = await verifyOtp(otpEmail, otp)
+      if (!result.valid || !result.token || !result.user_id || !result.email) {
+        setAuthError("OTP is invalid or expired.")
+        return
+      }
+
+      const session: AuthSession = {
+        token: result.token,
+        userId: result.user_id,
+        email: result.email,
+      }
+
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
+      setAuthSession(session)
+      setTargetUser(null)
+      setMessage("")
+      setAuthError(null)
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : "OTP verification error")
+    } finally {
+      setAuthLoading(false)
+    }
+  }
+
+  const onLogout = () => {
+    localStorage.removeItem(SESSION_STORAGE_KEY)
+    setAuthSession(null)
+    setEmailInput("")
+    setOtpInput("")
+    setOtpEmail(null)
+    setDevOtpHint(null)
+    setTargetUser(null)
+    setMessage("")
+    setAuthError(null)
+  }
+
+  if (!authSession) {
+    return (
+      <main className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-6">
+        <section className="w-full max-w-md rounded-2xl border border-gray-800 bg-gray-900 p-6 shadow-2xl">
+          <h1 className="text-2xl font-bold text-blue-400">Aydin Chat Login</h1>
+          <p className="mt-2 text-sm text-gray-400">Step one asks for email, step two verifies OTP.</p>
+
+          <form onSubmit={onSendOtp} className="mt-6 space-y-3">
+            <label className="text-sm text-gray-300 block">Email</label>
+            <input
+              value={emailInput}
+              onChange={(e) => setEmailInput(e.target.value)}
+              type="email"
+              placeholder="sample@mail.com"
+              className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={authLoading}
+            />
+            <button
+              type="submit"
+              disabled={authLoading}
+              className="w-full rounded-lg bg-blue-600 py-2 font-semibold hover:bg-blue-500 disabled:opacity-60"
+            >
+              {authLoading ? "Sending..." : "Send OTP"}
+            </button>
+          </form>
+
+          <form onSubmit={onVerifyOtp} className="mt-6 space-y-3">
+            <label className="text-sm text-gray-300 block">OTP Code</label>
+            <input
+              value={otpInput}
+              onChange={(e) => setOtpInput(e.target.value)}
+              inputMode="numeric"
+              placeholder="6 digit code"
+              className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
+              disabled={authLoading || !otpEmail}
+            />
+            <button
+              type="submit"
+              disabled={authLoading || !otpEmail}
+              className="w-full rounded-lg bg-emerald-600 py-2 font-semibold hover:bg-emerald-500 disabled:opacity-60"
+            >
+              {authLoading ? "Verifying..." : "Verify OTP"}
+            </button>
+          </form>
+
+          {devOtpHint && (
+            <p className="mt-4 rounded-lg border border-amber-700 bg-amber-950 px-3 py-2 text-xs text-amber-300">
+              Development OTP: {devOtpHint}
+            </p>
+          )}
+
+          {authError && (
+            <p className="mt-4 rounded-lg border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">
+              {authError}
+            </p>
+          )}
+        </section>
+      </main>
+    )
   }
 
   return (
@@ -124,7 +275,16 @@ export default function ChatPage() {
           ))}
         </div>
         <div className="mt-4 pt-4 border-t border-gray-700 opacity-50 text-xs text-center">
-          Senin ID: <span className="font-mono text-blue-300">{userId}</span>
+          Your ID: <span className="font-mono text-blue-300">{userId}</span>
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={onLogout}
+              className="rounded-md border border-gray-600 px-3 py-1 text-[11px] hover:bg-gray-700"
+            >
+              Logout
+            </button>
+          </div>
         </div>
       </div>
 
@@ -141,12 +301,17 @@ export default function ChatPage() {
                 <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
               )}
               {currentMessages.map((msg, i) => (
-                <div key={i} className={`flex ${msg.user === userId ? "justify-end" : "justify-start"}`}>
+                <div key={msg.id || i} className={`flex ${msg.from_user_id === userId ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[70%] p-3 rounded-2xl break-words ${
-                    msg.user === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
+                    msg.from_user_id === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
                   }`}>
                     <p className="text-sm">{msg.text}</p>
-                    <p className="text-[10px] mt-1 opacity-50 text-right">{msg.time}</p>
+                    <p className="text-[10px] mt-1 opacity-50 text-right">
+                      {new Date(msg.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </p>
                   </div>
                 </div>
               ))}
@@ -179,5 +344,5 @@ export default function ChatPage() {
         )}
       </div>
     </div>
-  );
+  )
 }
