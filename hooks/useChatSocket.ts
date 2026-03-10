@@ -11,6 +11,8 @@ interface UseChatSocketOptions {
 
 export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
+  const CHAT_HISTORY_DB_NAME = "chat_history_db"
+  const CHAT_HISTORY_STORE_NAME = "histories"
 
   const [onlineUsers, setOnlineUsers] = useState<string[]>([])
   const [messagesByPeer, setMessagesByPeer] = useState<Record<string, ChatMessage[]>>({})
@@ -23,6 +25,96 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   const reconnectAttemptsRef = useRef(0)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectRef = useRef<() => void>(() => { })
+  const historyHydratedRef = useRef(false)
+
+  const openHistoryDb = useCallback(() => {
+    return new Promise<IDBDatabase>((resolve, reject) => {
+      if (typeof window === "undefined" || !("indexedDB" in window)) {
+        reject(new Error("IndexedDB is not available"))
+        return
+      }
+
+      const request = window.indexedDB.open(CHAT_HISTORY_DB_NAME, 1)
+
+      request.onupgradeneeded = () => {
+        const db = request.result
+        if (!db.objectStoreNames.contains(CHAT_HISTORY_STORE_NAME)) {
+          db.createObjectStore(CHAT_HISTORY_STORE_NAME, { keyPath: "userId" })
+        }
+      }
+
+      request.onsuccess = () => {
+        resolve(request.result)
+      }
+
+      request.onerror = () => {
+        reject(request.error ?? new Error("Failed to open IndexedDB"))
+      }
+    })
+  }, [CHAT_HISTORY_DB_NAME, CHAT_HISTORY_STORE_NAME])
+
+  const readHistory = useCallback(
+    async (currentUserId: string) => {
+      const db = await openHistoryDb()
+
+      return await new Promise<Record<string, ChatMessage[]> | null>((resolve, reject) => {
+        const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readonly")
+        const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
+        const request = store.get(currentUserId)
+
+        request.onsuccess = () => {
+          const record = request.result as { userId: string, messagesByPeer: Record<string, ChatMessage[]> } | undefined
+          resolve(record?.messagesByPeer ?? null)
+        }
+
+        request.onerror = () => {
+          reject(request.error ?? new Error("Failed to read history"))
+        }
+
+        tx.oncomplete = () => {
+          db.close()
+        }
+
+        tx.onabort = () => {
+          reject(tx.error ?? new Error("Read transaction aborted"))
+          db.close()
+        }
+      })
+    },
+    [CHAT_HISTORY_STORE_NAME, openHistoryDb],
+  )
+
+  const writeHistory = useCallback(
+    async (currentUserId: string, nextMessagesByPeer: Record<string, ChatMessage[]>) => {
+      const db = await openHistoryDb()
+
+      await new Promise<void>((resolve, reject) => {
+        const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readwrite")
+        const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
+        store.put({
+          userId: currentUserId,
+          messagesByPeer: nextMessagesByPeer,
+          updatedAt: Date.now(),
+        })
+
+        tx.oncomplete = () => {
+          db.close()
+          resolve()
+        }
+
+        tx.onerror = () => {
+          reject(tx.error ?? new Error("Failed to persist history"))
+          db.close()
+        }
+
+        tx.onabort = () => {
+          reject(tx.error ?? new Error("Write transaction aborted"))
+          db.close()
+        }
+      })
+    },
+    [CHAT_HISTORY_STORE_NAME, openHistoryDb],
+  )
 
   const appendMessage = useCallback(
     (incoming: ChatMessage) => {
@@ -158,6 +250,52 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   useEffect(() => {
     connectRef.current = connect
   }, [connect])
+
+  useEffect(() => {
+    historyHydratedRef.current = false
+    let isCancelled = false
+
+    if (!userId) {
+      historyHydratedRef.current = true
+      queueMicrotask(() => {
+        if (!isCancelled) {
+          setMessagesByPeer({})
+        }
+      })
+
+      return () => {
+        isCancelled = true
+      }
+    }
+
+    void readHistory(userId)
+      .then((savedHistory) => {
+        historyHydratedRef.current = true
+        if (!isCancelled) {
+          setMessagesByPeer(savedHistory ?? {})
+        }
+      })
+      .catch(() => {
+        historyHydratedRef.current = true
+        if (!isCancelled) {
+          setMessagesByPeer({})
+        }
+      })
+
+    return () => {
+      isCancelled = true
+    }
+  }, [readHistory, userId])
+
+  useEffect(() => {
+    if (!userId || !historyHydratedRef.current) {
+      return
+    }
+
+    void writeHistory(userId, messagesByPeer).catch(() => {
+      // Ignore storage failures and keep chat usable.
+    })
+  }, [messagesByPeer, userId, writeHistory])
 
   useEffect(() => {
     shouldReconnectRef.current = true
