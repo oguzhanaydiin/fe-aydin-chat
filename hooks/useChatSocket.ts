@@ -26,6 +26,64 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const connectRef = useRef<() => void>(() => { })
   const historyHydratedRef = useRef(false)
+  const serverMessagePeerRef = useRef<Record<string, string>>({})
+
+  const markOutgoingMessageAsDelivered = useCallback((messageId: string, clientMessageId?: string) => {
+    if (!messageId && !clientMessageId) return
+
+    setMessagesByPeer((prev) => {
+      let changed = false
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      const peerId = serverMessagePeerRef.current[messageId]
+
+      if (peerId) {
+        const messages = next[peerId] || []
+        let peerChanged = false
+
+        const updatedMessages = messages.map((msg) => {
+          if (msg.id === messageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
+            peerChanged = true
+            changed = true
+            return { ...msg, delivery_status: "delivered" as const }
+          }
+
+          return msg
+        })
+
+        if (peerChanged) {
+          next[peerId] = updatedMessages
+        }
+      } else if (clientMessageId) {
+        Object.entries(prev).forEach(([currentPeerId, messages]) => {
+          let peerChanged = false
+
+          const updatedMessages = messages.map((msg) => {
+            if (msg.id === clientMessageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
+              peerChanged = true
+              changed = true
+              serverMessagePeerRef.current[messageId] = currentPeerId
+
+              return {
+                ...msg,
+                id: messageId,
+                client_message_id: clientMessageId,
+                delivery_status: "delivered" as const,
+              }
+            }
+
+            return msg
+          })
+
+          if (peerChanged) {
+            next[currentPeerId] = updatedMessages
+          }
+        })
+      }
+
+      return changed ? next : prev
+    })
+  }, [userId])
 
   const openHistoryDb = useCallback(() => {
     return new Promise<IDBDatabase>((resolve, reject) => {
@@ -213,11 +271,66 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         }
 
         if (data.type === "new_message") {
-          appendMessage(data.message)
+          appendMessage({
+            ...data.message,
+            delivery_status: data.message.from_user_id === userId ? "sent" : data.message.delivery_status,
+          })
+
+          if (data.message.from_user_id === userId) {
+            const peerId = data.message.to_user_id
+            serverMessagePeerRef.current[data.message.id] = peerId
+          }
 
           if (data.message.to_user_id === userId) {
             sendEvent({ type: "ack", message_ids: [data.message.id] })
           }
+          return
+        }
+
+        if (data.type === "message_queued") {
+          if (!data.client_message_id) {
+            return
+          }
+
+          setMessagesByPeer((prev) => {
+            let changed = false
+            const next: Record<string, ChatMessage[]> = { ...prev }
+
+            Object.entries(prev).forEach(([peerId, messages]) => {
+              let peerChanged = false
+
+              const updatedMessages = messages.map((msg) => {
+                if (msg.id !== data.client_message_id) {
+                  return msg
+                }
+
+                peerChanged = true
+                changed = true
+                serverMessagePeerRef.current[data.message_id] = peerId
+
+                return {
+                  ...msg,
+                  id: data.message_id,
+                  delivery_status: "sent" as const,
+                }
+              })
+
+              if (peerChanged) {
+                next[peerId] = updatedMessages
+              }
+            })
+
+            return changed ? next : prev
+          })
+          return
+        }
+
+        if (data.type === "message_delivered") {
+          markOutgoingMessageAsDelivered(data.message_id, data.client_message_id)
+          return
+        }
+
+        if (data.type === "ack_result") {
           return
         }
 
@@ -245,7 +358,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         scheduleReconnect()
       }
     }
-  }, [appendMessage, scheduleReconnect, sendEvent, token, userId, wsUrl])
+  }, [appendMessage, markOutgoingMessageAsDelivered, scheduleReconnect, sendEvent, token, userId, wsUrl])
 
   useEffect(() => {
     connectRef.current = connect
@@ -253,6 +366,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
 
   useEffect(() => {
     historyHydratedRef.current = false
+    serverMessagePeerRef.current = {}
     let isCancelled = false
 
     if (!userId) {
@@ -272,7 +386,19 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
       .then((savedHistory) => {
         historyHydratedRef.current = true
         if (!isCancelled) {
-          setMessagesByPeer(savedHistory ?? {})
+          const hydrated = savedHistory ?? {}
+          const nextPeerByServerId: Record<string, string> = {}
+
+          Object.entries(hydrated).forEach(([peerId, messages]) => {
+            messages.forEach((msg) => {
+              if (msg.from_user_id === userId && !msg.id.startsWith("local-")) {
+                nextPeerByServerId[msg.id] = peerId
+              }
+            })
+          })
+
+          serverMessagePeerRef.current = nextPeerByServerId
+          setMessagesByPeer(hydrated)
         }
       })
       .catch(() => {
@@ -328,12 +454,16 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
       const trimmed = text.trim()
       if (!trimmed || !toUserId || !userId) return
 
+      const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
       const localMessage: ChatMessage = {
-        id: `local-${Date.now()}`,
+        id: clientMessageId,
         from_user_id: userId,
         to_user_id: toUserId,
         text: trimmed,
         created_at: new Date().toISOString(),
+        client_message_id: clientMessageId,
+        delivery_status: "sending",
       }
 
       appendMessage(localMessage)
@@ -341,11 +471,33 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         type: "send_message",
         to_user_id: toUserId,
         text: trimmed,
-        client_message_id: localMessage.id,
+        client_message_id: clientMessageId,
       })
     },
     [appendMessage, sendEvent, userId],
   )
+
+  const clearChat = useCallback((peerId: string) => {
+    if (!peerId) return
+
+    setMessagesByPeer((prev) => {
+      if (!(peerId in prev)) {
+        return prev
+      }
+
+      const next = { ...prev }
+      const removedMessages = next[peerId] || []
+
+      removedMessages.forEach((msg) => {
+        if (msg.from_user_id === userId && !msg.id.startsWith("local-")) {
+          delete serverMessagePeerRef.current[msg.id]
+        }
+      })
+
+      delete next[peerId]
+      return next
+    })
+  }, [userId])
 
   return {
     onlineUsers,
@@ -354,5 +506,6 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
     status,
     error,
     sendMessage,
+    clearChat,
   }
 }

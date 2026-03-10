@@ -13,6 +13,16 @@ type AuthSession = {
   email: string
 }
 
+type MessageGroup = {
+  fromUserId: string
+  createdAt: string
+  deliveryStatus?: "sending" | "sent" | "delivered"
+  messages: Array<{
+    id: string
+    text: string
+  }>
+}
+
 async function requestOtp(email: string): Promise<SendOtpResponse> {
   const response = await fetch(`${API_URL}/otp/send`, {
     method: "POST",
@@ -85,7 +95,7 @@ export default function ChatPage() {
   const [message, setMessage] = useState("")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
-  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage } = useChatSocket({
+  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, clearChat } = useChatSocket({
     userId,
     token,
     wsUrl: WS_URL,
@@ -103,6 +113,14 @@ export default function ChatPage() {
     setTargetUser(otherId)
   }
 
+  const onClearChat = () => {
+    if (!targetUser) {
+      return
+    }
+
+    clearChat(targetUser)
+  }
+
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault()
     if (message.trim() && targetUser && userId) {
@@ -113,6 +131,43 @@ export default function ChatPage() {
   }
 
   const currentMessages = targetUser ? messagesByPeer[targetUser] || [] : []
+  const groupedMessages = currentMessages.reduce<MessageGroup[]>((groups, msg) => {
+    const createdAt = new Date(msg.created_at)
+    const minuteKey = `${createdAt.getFullYear()}-${createdAt.getMonth()}-${createdAt.getDate()}-${createdAt.getHours()}-${createdAt.getMinutes()}`
+    const lastGroup = groups[groups.length - 1]
+    const lastGroupMinute = lastGroup ? new Date(lastGroup.createdAt) : null
+    const lastMinuteKey = lastGroupMinute
+      ? `${lastGroupMinute.getFullYear()}-${lastGroupMinute.getMonth()}-${lastGroupMinute.getDate()}-${lastGroupMinute.getHours()}-${lastGroupMinute.getMinutes()}`
+      : null
+
+    if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
+      lastGroup.messages.push({ id: msg.id, text: msg.text })
+      lastGroup.createdAt = msg.created_at
+      lastGroup.deliveryStatus = msg.delivery_status
+      return groups
+    }
+
+    groups.push({
+      fromUserId: msg.from_user_id,
+      createdAt: msg.created_at,
+      deliveryStatus: msg.delivery_status,
+      messages: [{ id: msg.id, text: msg.text }],
+    })
+
+    return groups
+  }, [])
+
+  const renderOutgoingStatusTick = (status?: "sending" | "sent" | "delivered") => {
+    if (!status || status === "sending") {
+      return <span className="text-gray-200 font-semibold tracking-tight">...</span>
+    }
+
+    if (status === "delivered") {
+      return <span className="text-emerald-300 text-[11px] font-black leading-none">&#10003;</span>
+    }
+
+    return <span className="text-gray-200 text-[11px] font-black leading-none">&#10003;</span>
+  }
 
   const onSendOtp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -293,24 +348,40 @@ export default function ChatPage() {
         {targetUser ? (
           <>
             <div className="p-4 border-b border-gray-700 bg-gray-800 flex items-center shadow-sm">
-              <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
+              <div className="flex w-full items-center justify-between gap-4">
+                <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
+                <button
+                  type="button"
+                  onClick={onClearChat}
+                  className="rounded-md border border-gray-600 px-3 py-1 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                >
+                  Clear Chat
+                </button>
+              </div>
             </div>
             
             <div className="flex-1 p-6 overflow-y-auto bg-gray-900 space-y-4">
               {currentMessages.length === 0 && (
                 <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
               )}
-              {currentMessages.map((msg, i) => (
-                <div key={msg.id || i} className={`flex ${msg.from_user_id === userId ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[70%] p-3 rounded-2xl break-words ${
-                    msg.from_user_id === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
+              {groupedMessages.map((group, index) => (
+                <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={`flex ${group.fromUserId === userId ? "justify-end" : "justify-start"}`}>
+                  <div className={`max-w-[70%] p-3 rounded-2xl wrap-break-word ${
+                    group.fromUserId === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
                   }`}>
-                    <p className="text-sm">{msg.text}</p>
-                    <p className="text-[10px] mt-1 opacity-50 text-right">
-                      {new Date(msg.created_at).toLocaleTimeString([], {
+                    <div className="space-y-1.5">
+                      {group.messages.map((messagePart) => (
+                        <p key={messagePart.id} className="text-sm leading-5">
+                          {messagePart.text}
+                        </p>
+                      ))}
+                    </div>
+                    <p className="text-[10px] mt-1 opacity-50 text-right flex items-center justify-end gap-1">
+                      {new Date(group.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
+                      {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
                     </p>
                   </div>
                 </div>
