@@ -1,56 +1,20 @@
 "use client"
 import { useEffect, useState, useRef } from "react"
 import { useChatSocket } from "@/hooks/useChatSocket"
-import type { AuthSessionResponse, SendOtpResponse } from "@/lib/chat/types"
+import { requestOtp, saveUsername, verifyOtp } from "@/lib/chat/authApi"
+import { LoginView } from "@/app/components/chat/LoginView"
+import { UsernameSetupView } from "@/app/components/chat/UsernameSetupView"
+import { ChatLayout } from "@/app/components/chat/ChatLayout"
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://127.0.0.1:8080/ws"
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080"
 const SESSION_STORAGE_KEY = "chat_auth_session"
 
 type AuthSession = {
   token: string
   userId: string
   email: string
-}
-
-type MessageGroup = {
-  fromUserId: string
-  createdAt: string
-  deliveryStatus?: "sending" | "sent" | "delivered"
-  messages: Array<{
-    id: string
-    text: string
-  }>
-}
-
-async function requestOtp(email: string): Promise<SendOtpResponse> {
-  const response = await fetch(`${API_URL}/otp/send`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to send OTP")
-  }
-
-  return (await response.json()) as SendOtpResponse
-}
-
-async function verifyOtp(email: string, otp: string): Promise<AuthSessionResponse> {
-  const response = await fetch(`${API_URL}/otp/validate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, otp }),
-  })
-
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to verify OTP")
-  }
-
-  return (await response.json()) as AuthSessionResponse
+  username: string | null
+  needsUsernameSetup: boolean
 }
 
 export default function ChatPage() {
@@ -61,6 +25,9 @@ export default function ChatPage() {
   const [devOtpHint, setDevOtpHint] = useState<string | null>(null)
   const [authLoading, setAuthLoading] = useState(false)
   const [authError, setAuthError] = useState<string | null>(null)
+  const [usernameInput, setUsernameInput] = useState("")
+  const [usernameLoading, setUsernameLoading] = useState(false)
+  const [usernameError, setUsernameError] = useState<string | null>(null)
 
   useEffect(() => {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY)
@@ -82,14 +49,15 @@ export default function ChatPage() {
 
   const userId = authSession?.userId || ""
   const token = authSession?.token || ""
+  const displayName = authSession?.username || authSession?.userId || ""
 
   useEffect(() => {
-    if (authSession?.userId) {
-      document.title = `Chat - ${authSession.userId}`
+    if (displayName) {
+      document.title = `Chat - ${displayName}`
     } else {
       document.title = "Chat Login"
     }
-  }, [authSession?.userId])
+  }, [displayName])
 
   const [targetUser, setTargetUser] = useState<string | null>(null)
   const [message, setMessage] = useState("")
@@ -131,43 +99,6 @@ export default function ChatPage() {
   }
 
   const currentMessages = targetUser ? messagesByPeer[targetUser] || [] : []
-  const groupedMessages = currentMessages.reduce<MessageGroup[]>((groups, msg) => {
-    const createdAt = new Date(msg.created_at)
-    const minuteKey = `${createdAt.getFullYear()}-${createdAt.getMonth()}-${createdAt.getDate()}-${createdAt.getHours()}-${createdAt.getMinutes()}`
-    const lastGroup = groups[groups.length - 1]
-    const lastGroupMinute = lastGroup ? new Date(lastGroup.createdAt) : null
-    const lastMinuteKey = lastGroupMinute
-      ? `${lastGroupMinute.getFullYear()}-${lastGroupMinute.getMonth()}-${lastGroupMinute.getDate()}-${lastGroupMinute.getHours()}-${lastGroupMinute.getMinutes()}`
-      : null
-
-    if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
-      lastGroup.messages.push({ id: msg.id, text: msg.text })
-      lastGroup.createdAt = msg.created_at
-      lastGroup.deliveryStatus = msg.delivery_status
-      return groups
-    }
-
-    groups.push({
-      fromUserId: msg.from_user_id,
-      createdAt: msg.created_at,
-      deliveryStatus: msg.delivery_status,
-      messages: [{ id: msg.id, text: msg.text }],
-    })
-
-    return groups
-  }, [])
-
-  const renderOutgoingStatusTick = (status?: "sending" | "sent" | "delivered") => {
-    if (!status || status === "sending") {
-      return <span className="text-gray-200 font-semibold tracking-tight">...</span>
-    }
-
-    if (status === "delivered") {
-      return <span className="text-emerald-300 text-[11px] font-black leading-none">&#10003;</span>
-    }
-
-    return <span className="text-gray-200 text-[11px] font-black leading-none">&#10003;</span>
-  }
 
   const onSendOtp = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -216,10 +147,14 @@ export default function ChatPage() {
         return
       }
 
+      const needsUsernameSetup = !result.username?.trim()
+
       const session: AuthSession = {
         token: result.token,
         userId: result.user_id,
         email: result.email,
+        username: result.username ?? null,
+        needsUsernameSetup,
       }
 
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(session))
@@ -227,10 +162,46 @@ export default function ChatPage() {
       setTargetUser(null)
       setMessage("")
       setAuthError(null)
+      setUsernameInput("")
+      setUsernameError(null)
     } catch (err) {
       setAuthError(err instanceof Error ? err.message : "OTP verification error")
     } finally {
       setAuthLoading(false)
+    }
+  }
+
+  const onSaveUsername = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!authSession) {
+      return
+    }
+
+    const username = usernameInput.trim()
+
+    if (!username) {
+      setUsernameError("Username is required.")
+      return
+    }
+
+    setUsernameLoading(true)
+    setUsernameError(null)
+
+    try {
+      const result = await saveUsername(authSession.token, username)
+      const nextSession: AuthSession = {
+        ...authSession,
+        username: result.username,
+        needsUsernameSetup: false,
+      }
+
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession))
+      setAuthSession(nextSession)
+      setUsernameInput("")
+    } catch (err) {
+      setUsernameError(err instanceof Error ? err.message : "Username setup error")
+    } finally {
+      setUsernameLoading(false)
     }
   }
 
@@ -241,6 +212,8 @@ export default function ChatPage() {
     setOtpInput("")
     setOtpEmail(null)
     setDevOtpHint(null)
+    setUsernameInput("")
+    setUsernameError(null)
     setTargetUser(null)
     setMessage("")
     setAuthError(null)
@@ -248,172 +221,48 @@ export default function ChatPage() {
 
   if (!authSession) {
     return (
-      <main className="min-h-screen bg-gray-950 text-gray-100 flex items-center justify-center p-6">
-        <section className="w-full max-w-md rounded-2xl border border-gray-800 bg-gray-900 p-6 shadow-2xl">
-          <h1 className="text-2xl font-bold text-blue-400">Aydin Chat Login</h1>
-          <p className="mt-2 text-sm text-gray-400">Step one asks for email, step two verifies OTP.</p>
+      <LoginView
+        emailInput={emailInput}
+        otpInput={otpInput}
+        otpEmail={otpEmail}
+        authLoading={authLoading}
+        devOtpHint={devOtpHint}
+        authError={authError}
+        onEmailChange={setEmailInput}
+        onOtpChange={setOtpInput}
+        onSendOtp={onSendOtp}
+        onVerifyOtp={onVerifyOtp}
+      />
+    )
+  }
 
-          <form onSubmit={onSendOtp} className="mt-6 space-y-3">
-            <label className="text-sm text-gray-300 block">Email</label>
-            <input
-              value={emailInput}
-              onChange={(e) => setEmailInput(e.target.value)}
-              type="email"
-              placeholder="sample@mail.com"
-              className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={authLoading}
-            />
-            <button
-              type="submit"
-              disabled={authLoading}
-              className="w-full rounded-lg bg-blue-600 py-2 font-semibold hover:bg-blue-500 disabled:opacity-60"
-            >
-              {authLoading ? "Sending..." : "Send OTP"}
-            </button>
-          </form>
-
-          <form onSubmit={onVerifyOtp} className="mt-6 space-y-3">
-            <label className="text-sm text-gray-300 block">OTP Code</label>
-            <input
-              value={otpInput}
-              onChange={(e) => setOtpInput(e.target.value)}
-              inputMode="numeric"
-              placeholder="6 digit code"
-              className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 outline-none focus:ring-2 focus:ring-blue-500"
-              disabled={authLoading || !otpEmail}
-            />
-            <button
-              type="submit"
-              disabled={authLoading || !otpEmail}
-              className="w-full rounded-lg bg-emerald-600 py-2 font-semibold hover:bg-emerald-500 disabled:opacity-60"
-            >
-              {authLoading ? "Verifying..." : "Verify OTP"}
-            </button>
-          </form>
-
-          {devOtpHint && (
-            <p className="mt-4 rounded-lg border border-amber-700 bg-amber-950 px-3 py-2 text-xs text-amber-300">
-              Development OTP: {devOtpHint}
-            </p>
-          )}
-
-          {authError && (
-            <p className="mt-4 rounded-lg border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">
-              {authError}
-            </p>
-          )}
-        </section>
-      </main>
+  if (authSession.needsUsernameSetup) {
+    return (
+      <UsernameSetupView
+        usernameInput={usernameInput}
+        usernameLoading={usernameLoading}
+        usernameError={usernameError}
+        onUsernameChange={setUsernameInput}
+        onSaveUsername={onSaveUsername}
+        onLogout={onLogout}
+      />
     )
   }
 
   return (
-    <div className="flex h-screen bg-gray-900 text-white font-sans">
-      {/* SIDEBAR */}
-      <div className="w-1/4 border-r border-gray-700 p-4 overflow-y-auto bg-gray-800 flex flex-col">
-        <h2 className="text-xl font-bold mb-6 text-blue-400">Active Users</h2>
-        <div className="space-y-2 flex-1">
-          {onlineUsers.length === 0 && <p className="text-gray-500 text-sm">No one is online...</p>}
-          {onlineUsers.map((u) => (
-            <button
-              key={u}
-              onClick={() => startChat(u)}
-              className={`w-full text-left p-3 rounded-lg transition ${
-                targetUser === u ? "bg-blue-600 shadow-lg" : "hover:bg-gray-700 bg-gray-750"
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${targetUser === u ? 'bg-white' : 'bg-green-500'}`}></div>
-                <span className="truncate">{u}</span>
-              </div>
-            </button>
-          ))}
-        </div>
-        <div className="mt-4 pt-4 border-t border-gray-700 opacity-50 text-xs text-center">
-          Your ID: <span className="font-mono text-blue-300">{userId}</span>
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={onLogout}
-              className="rounded-md border border-gray-600 px-3 py-1 text-[11px] hover:bg-gray-700"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* CHAT */}
-      <div className="flex-1 flex flex-col">
-        {targetUser ? (
-          <>
-            <div className="p-4 border-b border-gray-700 bg-gray-800 flex items-center shadow-sm">
-              <div className="flex w-full items-center justify-between gap-4">
-                <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
-                <button
-                  type="button"
-                  onClick={onClearChat}
-                  className="rounded-md border border-gray-600 px-3 py-1 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
-                >
-                  Clear Chat
-                </button>
-              </div>
-            </div>
-            
-            <div className="flex-1 p-6 overflow-y-auto bg-gray-900 space-y-4">
-              {currentMessages.length === 0 && (
-                <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
-              )}
-              {groupedMessages.map((group, index) => (
-                <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={`flex ${group.fromUserId === userId ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[70%] p-3 rounded-2xl wrap-break-word ${
-                    group.fromUserId === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
-                  }`}>
-                    <div className="space-y-1.5">
-                      {group.messages.map((messagePart) => (
-                        <p key={messagePart.id} className="text-sm leading-5">
-                          {messagePart.text}
-                        </p>
-                      ))}
-                    </div>
-                    <p className="text-[10px] mt-1 opacity-50 text-right flex items-center justify-end gap-1">
-                      {new Date(group.createdAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                      {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
-                    </p>
-                  </div>
-                </div>
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-
-            <form onSubmit={sendMessage} className="p-4 bg-gray-800 border-t border-gray-700 flex gap-4">
-              <input
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 bg-gray-700 border-none rounded-full px-6 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400"
-              />
-              <button 
-                type="submit"
-                disabled={!message.trim()}
-                className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2 rounded-full font-bold transition"
-              >
-                Send
-              </button>
-            </form>
-          </>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
-             <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4">
-              <span className="text-2xl">👋</span>
-            </div>
-            <p>Select a person from the left to start chatting.</p>
-          </div>
-        )}
-      </div>
-    </div>
+    <ChatLayout
+      onlineUsers={onlineUsers}
+      targetUser={targetUser}
+      displayName={displayName}
+      userId={userId}
+      message={message}
+      currentMessages={currentMessages}
+      messagesEndRef={messagesEndRef}
+      onStartChat={startChat}
+      onClearChat={onClearChat}
+      onLogout={onLogout}
+      onMessageChange={setMessage}
+      onSendMessage={sendMessage}
+    />
   )
 }

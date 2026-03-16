@@ -19,6 +19,11 @@ export interface AuthSessionResponse {
   token: string | null
   user_id: string | null
   email: string | null
+  username?: string | null
+}
+
+export interface SaveUsernameResponse {
+  username: string
 }
 
 export type WsClientEvent =
