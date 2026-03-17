@@ -2,7 +2,7 @@ import type { FormEvent, RefObject } from "react"
 import type { ChatMessage } from "@/lib/chat/types"
 
 type MessageGroup = {
-  fromUserId: string
+  fromUsername: string
   createdAt: string
   deliveryStatus?: "sending" | "sent" | "delivered"
   messages: Array<{
@@ -48,7 +48,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       ? `${lastGroupMinute.getFullYear()}-${lastGroupMinute.getMonth()}-${lastGroupMinute.getDate()}-${lastGroupMinute.getHours()}-${lastGroupMinute.getMinutes()}`
       : null
 
-    if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
+    if (lastGroup && lastGroup.fromUsername === msg.from_username && lastMinuteKey === minuteKey) {
       lastGroup.messages.push({ id: msg.id, text: msg.text })
       lastGroup.createdAt = msg.created_at
       lastGroup.deliveryStatus = msg.delivery_status
@@ -56,7 +56,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
     }
 
     groups.push({
-      fromUserId: msg.from_user_id,
+      fromUsername: msg.from_username,
       createdAt: msg.created_at,
       deliveryStatus: msg.delivery_status,
       messages: [{ id: msg.id, text: msg.text }],
@@ -138,9 +138,9 @@ export function ChatLayout({
                 <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
               )}
               {groupedMessages.map((group, index) => (
-                <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={`flex ${group.fromUserId === userId ? "justify-end" : "justify-start"}`}>
+                <div key={`${group.fromUsername}-${group.createdAt}-${index}`} className={`flex ${group.fromUsername === userId ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[70%] p-3 rounded-2xl wrap-break-word ${
-                    group.fromUserId === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
+                    group.fromUsername === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
                   }`}>
                     <div className="space-y-1.5">
                       {group.messages.map((messagePart) => (
@@ -154,7 +154,7 @@ export function ChatLayout({
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
-                      {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
+                      {group.fromUsername === userId && renderOutgoingStatusTick(group.deliveryStatus)}
                     </p>
                   </div>
                 </div>
