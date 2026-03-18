@@ -63,11 +63,75 @@ export default function ChatPage() {
   const [message, setMessage] = useState("")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
-  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, clearChat } = useChatSocket({
+  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, sendImageMessage, clearChat } = useChatSocket({
     userId,
     token,
     wsUrl: WS_URL,
   })
+
+  const fileToDataUrl = (file: File) => {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => {
+        const result = reader.result
+        if (typeof result === "string") {
+          resolve(result)
+          return
+        }
+
+        reject(new Error("Invalid file data"))
+      }
+      reader.onerror = () => {
+        reject(reader.error ?? new Error("Failed to read file"))
+      }
+      reader.readAsDataURL(file)
+    })
+  }
+
+  const loadImageFromDataUrl = (dataUrl: string) => {
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+      const image = new window.Image()
+      image.onload = () => resolve(image)
+      image.onerror = () => reject(new Error("Failed to load image"))
+      image.src = dataUrl
+    })
+  }
+
+  const optimizeImageForMessage = async (file: File) => {
+    const sourceDataUrl = await fileToDataUrl(file)
+    const image = await loadImageFromDataUrl(sourceDataUrl)
+
+    const MAX_DIMENSION = 640
+    const scale = Math.min(1, MAX_DIMENSION / Math.max(image.width, image.height))
+    const width = Math.max(1, Math.round(image.width * scale))
+    const height = Math.max(1, Math.round(image.height * scale))
+
+    const canvas = document.createElement("canvas")
+    canvas.width = width
+    canvas.height = height
+
+    const ctx = canvas.getContext("2d")
+    if (!ctx) {
+      return sourceDataUrl
+    }
+
+    ctx.drawImage(image, 0, 0, width, height)
+
+    const MAX_DATA_URL_LENGTH = 50_000
+    let quality = 0.78
+    let output = canvas.toDataURL("image/jpeg", quality)
+
+    while (output.length > MAX_DATA_URL_LENGTH && quality > 0.24) {
+      quality -= 0.1
+      output = canvas.toDataURL("image/jpeg", quality)
+    }
+
+    if (output.length > MAX_DATA_URL_LENGTH) {
+      throw new Error("Image is still too large after optimization")
+    }
+
+    return output
+  }
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -95,6 +159,29 @@ export default function ChatPage() {
       sendChatMessage(targetUser, message)
 
       setMessage("")
+    }
+  }
+
+  const onSendImage = async (file: File) => {
+    if (!targetUser || !userId) {
+      return
+    }
+
+    if (!file.type.startsWith("image/")) {
+      return
+    }
+
+    const MAX_SOURCE_IMAGE_SIZE_BYTES = 20 * 1024 * 1024
+    if (file.size > MAX_SOURCE_IMAGE_SIZE_BYTES) {
+      window.alert("Image is too large. Please choose a file smaller than 20MB.")
+      return
+    }
+
+    try {
+      const imageDataUrl = await optimizeImageForMessage(file)
+      sendImageMessage(targetUser, imageDataUrl)
+    } catch {
+      window.alert("Image could not be prepared for sending. Try a smaller image.")
     }
   }
 
@@ -263,6 +350,7 @@ export default function ChatPage() {
       onLogout={onLogout}
       onMessageChange={setMessage}
       onSendMessage={sendMessage}
+      onSendImage={onSendImage}
     />
   )
 }
