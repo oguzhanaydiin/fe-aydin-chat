@@ -8,6 +8,17 @@ import { ChatLayout } from "@/app/components/chat/ChatLayout"
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://127.0.0.1:8080/ws"
 const SESSION_STORAGE_KEY = "chat_auth_session"
+const BACKEND_MAX_WS_TEXT_LENGTH = 4000
+const BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH = 6 * 1024 * 1024
+
+function resolveMaxWsTextLength() {
+  const parsed = Number(process.env.NEXT_PUBLIC_WS_MAX_TEXT_LENGTH)
+  if (Number.isFinite(parsed) && parsed >= 512) {
+    return Math.min(Math.floor(parsed), BACKEND_MAX_WS_TEXT_LENGTH)
+  }
+
+  return BACKEND_MAX_WS_TEXT_LENGTH
+}
 
 type AuthSession = {
   token: string
@@ -18,6 +29,7 @@ type AuthSession = {
 }
 
 export default function ChatPage() {
+  const maxWsTextLength = resolveMaxWsTextLength()
   const [authSession, setAuthSession] = useState<AuthSession | null>(null)
   const [emailInput, setEmailInput] = useState("")
   const [otpInput, setOtpInput] = useState("")
@@ -101,36 +113,62 @@ export default function ChatPage() {
     const sourceDataUrl = await fileToDataUrl(file)
     const image = await loadImageFromDataUrl(sourceDataUrl)
 
-    const MAX_DIMENSION = 640
-    const scale = Math.min(1, MAX_DIMENSION / Math.max(image.width, image.height))
-    const width = Math.max(1, Math.round(image.width * scale))
-    const height = Math.max(1, Math.round(image.height * scale))
-
+    const maxImageDataUrlLength = Number(process.env.NEXT_PUBLIC_WS_MAX_IMAGE_DATA_URL_LENGTH)
+    const targetMaxDataUrlLength = Number.isFinite(maxImageDataUrlLength) && maxImageDataUrlLength > 4096
+      ? Math.floor(maxImageDataUrlLength)
+      : BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH
+    const MAX_DATA_URL_LENGTH = Math.max(4096, targetMaxDataUrlLength - 512)
     const canvas = document.createElement("canvas")
-    canvas.width = width
-    canvas.height = height
-
     const ctx = canvas.getContext("2d")
     if (!ctx) {
       return sourceDataUrl
     }
 
-    ctx.drawImage(image, 0, 0, width, height)
+    const maxSide = Math.max(image.width, image.height)
+    const dimensionCaps = [1280, 1120, 960, 840, 720, 640, 560, 480, 400, 320]
 
-    const MAX_DATA_URL_LENGTH = 50_000
-    let quality = 0.78
-    let output = canvas.toDataURL("image/jpeg", quality)
+    const encodeWithinTarget = (mimeType: "image/webp" | "image/jpeg") => {
+      let low = 0.3
+      let high = 0.95
+      let best = ""
 
-    while (output.length > MAX_DATA_URL_LENGTH && quality > 0.24) {
-      quality -= 0.1
-      output = canvas.toDataURL("image/jpeg", quality)
+      for (let i = 0; i < 8; i += 1) {
+        const quality = (low + high) / 2
+        const output = canvas.toDataURL(mimeType, quality)
+
+        if (output.length <= MAX_DATA_URL_LENGTH) {
+          best = output
+          low = quality
+        } else {
+          high = quality
+        }
+      }
+
+      return best
     }
 
-    if (output.length > MAX_DATA_URL_LENGTH) {
-      throw new Error("Image is still too large after optimization")
+    for (const cap of dimensionCaps) {
+      const scale = Math.min(1, cap / maxSide)
+      const width = Math.max(1, Math.round(image.width * scale))
+      const height = Math.max(1, Math.round(image.height * scale))
+
+      canvas.width = width
+      canvas.height = height
+      ctx.clearRect(0, 0, width, height)
+      ctx.drawImage(image, 0, 0, width, height)
+
+      const webpOutput = encodeWithinTarget("image/webp")
+      if (webpOutput) {
+        return webpOutput
+      }
+
+      const jpegOutput = encodeWithinTarget("image/jpeg")
+      if (jpegOutput) {
+        return jpegOutput
+      }
     }
 
-    return output
+    throw new Error("Image is still too large after optimization")
   }
 
   const scrollToBottom = () => {
@@ -155,8 +193,14 @@ export default function ChatPage() {
 
   const sendMessage = (e: React.FormEvent) => {
     e.preventDefault()
-    if (message.trim() && targetUser && userId) {
-      sendChatMessage(targetUser, message)
+    const trimmed = message.trim()
+    if (trimmed && targetUser && userId) {
+      if (trimmed.length > maxWsTextLength) {
+        window.alert(`Message is too long. Max ${maxWsTextLength} characters.`)
+        return
+      }
+
+      sendChatMessage(targetUser, trimmed)
 
       setMessage("")
     }
@@ -179,6 +223,12 @@ export default function ChatPage() {
 
     try {
       const imageDataUrl = await optimizeImageForMessage(file)
+
+      if (imageDataUrl.length > BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH) {
+        window.alert("Image is too large for chat image limit. Try a smaller image.")
+        return
+      }
+
       sendImageMessage(targetUser, imageDataUrl)
     } catch {
       window.alert("Image could not be prepared for sending. Try a smaller image.")

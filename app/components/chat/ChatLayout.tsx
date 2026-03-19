@@ -1,13 +1,16 @@
-import type { FormEvent, RefObject } from "react"
+import { useRef } from "react"
+import type { ChangeEvent, FormEvent, RefObject } from "react"
+import Image from "next/image"
 import type { ChatMessage } from "@/lib/chat/types"
 
 type MessageGroup = {
-  fromUsername: string
+  fromUserId: string
   createdAt: string
   deliveryStatus?: "sending" | "sent" | "delivered"
   messages: Array<{
     id: string
     text: string
+    imageDataUrl?: string
   }>
 }
 
@@ -24,6 +27,7 @@ type ChatLayoutProps = {
   onLogout: () => void
   onMessageChange: (value: string) => void
   onSendMessage: (e: FormEvent) => void
+  onSendImage: (file: File) => void | Promise<void>
 }
 
 function renderOutgoingStatusTick(status?: "sending" | "sent" | "delivered") {
@@ -48,18 +52,18 @@ function groupMessages(currentMessages: ChatMessage[]) {
       ? `${lastGroupMinute.getFullYear()}-${lastGroupMinute.getMonth()}-${lastGroupMinute.getDate()}-${lastGroupMinute.getHours()}-${lastGroupMinute.getMinutes()}`
       : null
 
-    if (lastGroup && lastGroup.fromUsername === msg.from_username && lastMinuteKey === minuteKey) {
-      lastGroup.messages.push({ id: msg.id, text: msg.text })
+    if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
+      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url })
       lastGroup.createdAt = msg.created_at
       lastGroup.deliveryStatus = msg.delivery_status
       return groups
     }
 
     groups.push({
-      fromUsername: msg.from_username,
+      fromUserId: msg.from_user_id,
       createdAt: msg.created_at,
       deliveryStatus: msg.delivery_status,
-      messages: [{ id: msg.id, text: msg.text }],
+      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url }],
     })
 
     return groups
@@ -79,16 +83,37 @@ export function ChatLayout({
   onLogout,
   onMessageChange,
   onSendMessage,
+  onSendImage,
 }: ChatLayoutProps) {
   const groupedMessages = groupMessages(currentMessages)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const normalizedDisplayName = displayName.trim().toLowerCase()
+  const normalizedUserId = userId.trim().toLowerCase()
+  const visibleOnlineUsers = onlineUsers.filter((u) => {
+    const normalized = u.trim().toLowerCase()
+    return normalized !== normalizedDisplayName && normalized !== normalizedUserId
+  })
+
+  const onImagePickerClick = () => {
+    imageInputRef.current?.click()
+  }
+
+  const onImageInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      void onSendImage(file)
+    }
+
+    event.target.value = ""
+  }
 
   return (
     <div className="flex h-screen bg-gray-900 text-white font-sans">
       <div className="w-1/4 border-r border-gray-700 p-4 overflow-y-auto bg-gray-800 flex flex-col">
         <h2 className="text-xl font-bold mb-6 text-blue-400">Active Users</h2>
         <div className="space-y-2 flex-1">
-          {onlineUsers.length === 0 && <p className="text-gray-500 text-sm">No one is online...</p>}
-          {onlineUsers.map((u) => (
+          {visibleOnlineUsers.length === 0 && <p className="text-gray-500 text-sm">No one is online...</p>}
+          {visibleOnlineUsers.map((u) => (
             <button
               key={u}
               onClick={() => onStartChat(u)}
@@ -138,15 +163,27 @@ export function ChatLayout({
                 <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
               )}
               {groupedMessages.map((group, index) => (
-                <div key={`${group.fromUsername}-${group.createdAt}-${index}`} className={`flex ${group.fromUsername === userId ? "justify-end" : "justify-start"}`}>
+                <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={`flex ${group.fromUserId === userId ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[70%] p-3 rounded-2xl wrap-break-word ${
-                    group.fromUsername === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
+                    group.fromUserId === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
                   }`}>
                     <div className="space-y-1.5">
                       {group.messages.map((messagePart) => (
-                        <p key={messagePart.id} className="text-sm leading-5">
-                          {messagePart.text}
-                        </p>
+                        <div key={messagePart.id} className="space-y-2">
+                          {messagePart.text ? (
+                            <p className="text-sm leading-5 whitespace-pre-wrap wrap-break-word">{messagePart.text}</p>
+                          ) : null}
+                          {messagePart.imageDataUrl ? (
+                            <Image
+                              src={messagePart.imageDataUrl}
+                              alt="Shared image"
+                              width={720}
+                              height={720}
+                              unoptimized
+                              className="max-h-72 w-auto max-w-full rounded-lg border border-black/20 object-contain"
+                            />
+                          ) : null}
+                        </div>
                       ))}
                     </div>
                     <p className="text-[10px] mt-1 opacity-50 text-right flex items-center justify-end gap-1">
@@ -154,7 +191,7 @@ export function ChatLayout({
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
-                      {group.fromUsername === userId && renderOutgoingStatusTick(group.deliveryStatus)}
+                      {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
                     </p>
                   </div>
                 </div>
@@ -163,12 +200,30 @@ export function ChatLayout({
             </div>
 
             <form onSubmit={onSendMessage} className="p-4 bg-gray-800 border-t border-gray-700 flex gap-4">
-              <input
-                value={message}
-                onChange={(e) => onMessageChange(e.target.value)}
-                placeholder="Type a message..."
-                className="flex-1 bg-gray-700 border-none rounded-full px-6 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400"
-              />
+              <div className="relative flex-1">
+                <input
+                  value={message}
+                  onChange={(e) => onMessageChange(e.target.value)}
+                  placeholder="Type a message..."
+                  className="w-full bg-gray-700 border-none rounded-full pl-6 pr-14 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400"
+                />
+                <button
+                  type="button"
+                  onClick={onImagePickerClick}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-gray-600 text-lg font-semibold leading-none hover:bg-gray-500 transition"
+                  aria-label="Add photo"
+                  title="Add photo"
+                >
+                  +
+                </button>
+                <input
+                  ref={imageInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={onImageInputChange}
+                />
+              </div>
               <button
                 type="submit"
                 disabled={!message.trim()}
