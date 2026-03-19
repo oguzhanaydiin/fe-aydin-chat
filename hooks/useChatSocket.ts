@@ -27,7 +27,38 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   const connectRef = useRef<() => void>(() => { })
   const historyHydratedRef = useRef(false)
   const serverMessagePeerRef = useRef<Record<string, string>>({})
-  const registeredUsernameRef = useRef<string | null>(null)
+
+  const normalizeIncomingMessage = useCallback((incoming: Partial<ChatMessage> & Record<string, unknown>): ChatMessage | null => {
+    const id = typeof incoming.id === "string" ? incoming.id : ""
+    const fromUserId = typeof incoming.from_user_id === "string"
+      ? incoming.from_user_id
+      : (typeof incoming.from_username === "string" ? incoming.from_username : "")
+    const toUserId = typeof incoming.to_user_id === "string"
+      ? incoming.to_user_id
+      : (typeof incoming.to_username === "string" ? incoming.to_username : "")
+    const createdAt = typeof incoming.created_at === "string" ? incoming.created_at : new Date().toISOString()
+    const text = typeof incoming.text === "string" ? incoming.text : ""
+    const imageDataUrl = typeof incoming.image_data_url === "string" ? incoming.image_data_url : undefined
+    const clientMessageId = typeof incoming.client_message_id === "string" ? incoming.client_message_id : undefined
+    const deliveryStatus = incoming.delivery_status === "sending" || incoming.delivery_status === "sent" || incoming.delivery_status === "delivered"
+      ? incoming.delivery_status
+      : undefined
+
+    if (!id || !fromUserId || !toUserId) {
+      return null
+    }
+
+    return {
+      id,
+      from_user_id: fromUserId,
+      to_user_id: toUserId,
+      text,
+      image_data_url: imageDataUrl,
+      created_at: createdAt,
+      client_message_id: clientMessageId,
+      delivery_status: deliveryStatus,
+    }
+  }, [])
 
   const markOutgoingMessageAsDelivered = useCallback((messageId: string, clientMessageId?: string) => {
     if (!messageId && !clientMessageId) return
@@ -43,7 +74,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         let peerChanged = false
 
         const updatedMessages = messages.map((msg) => {
-          if (msg.id === messageId && msg.from_username === userId && msg.delivery_status !== "delivered") {
+          if (msg.id === messageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
             peerChanged = true
             changed = true
             return { ...msg, delivery_status: "delivered" as const }
@@ -60,7 +91,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
           let peerChanged = false
 
           const updatedMessages = messages.map((msg) => {
-            if (msg.id === clientMessageId && msg.from_username === userId && msg.delivery_status !== "delivered") {
+            if (msg.id === clientMessageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
               peerChanged = true
               changed = true
               serverMessagePeerRef.current[messageId] = currentPeerId
@@ -177,7 +208,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
 
   const appendMessage = useCallback(
     (incoming: ChatMessage) => {
-      const peerId = incoming.from_username === userId ? incoming.to_username : incoming.from_username
+      const peerId = incoming.from_user_id === userId ? incoming.to_user_id : incoming.from_user_id
 
       setMessagesByPeer((prev) => {
         const existing = prev[peerId] || []
@@ -252,22 +283,21 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         const data = JSON.parse(ev.data) as WsServerEvent
 
         if (data.type === "online_users") {
-          const self = registeredUsernameRef.current ?? userId
-          setOnlineUsers(data.users.filter((u) => u !== self))
-          return
-        }
-
-        if (data.type === "registered") {
-          registeredUsernameRef.current = data.username
+          setOnlineUsers(data.users.filter((u) => u !== userId))
           return
         }
 
         if (data.type === "inbox") {
           const receivedIds: string[] = []
           data.messages.forEach((msg) => {
-            appendMessage(msg)
-            if (msg.to_username === userId) {
-              receivedIds.push(msg.id)
+            const normalized = normalizeIncomingMessage(msg as Partial<ChatMessage> & Record<string, unknown>)
+            if (!normalized) {
+              return
+            }
+
+            appendMessage(normalized)
+            if (normalized.to_user_id === userId) {
+              receivedIds.push(normalized.id)
             }
           })
 
@@ -278,18 +308,23 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         }
 
         if (data.type === "new_message") {
-          appendMessage({
-            ...data.message,
-            delivery_status: data.message.from_username === userId ? "sent" : data.message.delivery_status,
-          })
-
-          if (data.message.from_username === userId) {
-            const peerId = data.message.to_username
-            serverMessagePeerRef.current[data.message.id] = peerId
+          const normalized = normalizeIncomingMessage(data.message as Partial<ChatMessage> & Record<string, unknown>)
+          if (!normalized) {
+            return
           }
 
-          if (data.message.to_username === userId) {
-            sendEvent({ type: "ack", message_ids: [data.message.id] })
+          appendMessage({
+            ...normalized,
+            delivery_status: normalized.from_user_id === userId ? "sent" : normalized.delivery_status,
+          })
+
+          if (normalized.from_user_id === userId) {
+            const peerId = normalized.to_user_id
+            serverMessagePeerRef.current[normalized.id] = peerId
+          }
+
+          if (normalized.to_user_id === userId) {
+            sendEvent({ type: "ack", message_ids: [normalized.id] })
           }
           return
         }
@@ -357,7 +392,6 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
     }
 
     ws.onclose = () => {
-      registeredUsernameRef.current = null
       setIsConnected(false)
       setStatus("closed")
       socketRef.current = null
@@ -366,7 +400,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         scheduleReconnect()
       }
     }
-  }, [appendMessage, markOutgoingMessageAsDelivered, scheduleReconnect, sendEvent, token, userId, wsUrl])
+  }, [appendMessage, markOutgoingMessageAsDelivered, normalizeIncomingMessage, scheduleReconnect, sendEvent, token, userId, wsUrl])
 
   useEffect(() => {
     connectRef.current = connect
@@ -399,7 +433,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
 
           Object.entries(hydrated).forEach(([peerId, messages]) => {
             messages.forEach((msg) => {
-              if (msg.from_username === userId && !msg.id.startsWith("local-")) {
+              if (msg.from_user_id === userId && !msg.id.startsWith("local-")) {
                 nextPeerByServerId[msg.id] = peerId
               }
             })
@@ -466,8 +500,8 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
 
       const localMessage: ChatMessage = {
         id: clientMessageId,
-        from_username: userId,
-        to_username: toUserId,
+        from_user_id: userId,
+        to_user_id: toUserId,
         text: trimmed,
         created_at: new Date().toISOString(),
         client_message_id: clientMessageId,
@@ -477,8 +511,38 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
       appendMessage(localMessage)
       sendEvent({
         type: "send_message",
-        to_username: toUserId,
+        to_user_id: toUserId,
         text: trimmed,
+        client_message_id: clientMessageId,
+      })
+    },
+    [appendMessage, sendEvent, userId],
+  )
+
+  const sendImageMessage = useCallback(
+    (toUserId: string, imageDataUrl: string) => {
+      const normalizedImage = imageDataUrl.trim()
+      if (!normalizedImage || !toUserId || !userId) return
+
+      const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+      const localMessage: ChatMessage = {
+        id: clientMessageId,
+        from_user_id: userId,
+        to_user_id: toUserId,
+        text: "",
+        image_data_url: normalizedImage,
+        created_at: new Date().toISOString(),
+        client_message_id: clientMessageId,
+        delivery_status: "sending",
+      }
+
+      appendMessage(localMessage)
+      sendEvent({
+        type: "send_message",
+        to_user_id: toUserId,
+        text: "",
+        image_data_url: normalizedImage,
         client_message_id: clientMessageId,
       })
     },
@@ -488,24 +552,76 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
   const clearChat = useCallback((peerId: string) => {
     if (!peerId) return
 
+    const normalizedPeerId = peerId.trim().toLowerCase()
+
     setMessagesByPeer((prev) => {
-      if (!(peerId in prev)) {
+      let foundPeer: string | null = null
+      for (const key of Object.keys(prev)) {
+        if (key.trim().toLowerCase() === normalizedPeerId) {
+          foundPeer = key
+          break
+        }
+      }
+
+      if (!foundPeer) {
         return prev
       }
 
       const next = { ...prev }
-      const removedMessages = next[peerId] || []
+      const removedMessages = next[foundPeer] || []
 
       removedMessages.forEach((msg) => {
-        if (msg.from_username === userId && !msg.id.startsWith("local-")) {
+        if (msg.from_user_id === userId && !msg.id.startsWith("local-")) {
           delete serverMessagePeerRef.current[msg.id]
         }
       })
 
-      delete next[peerId]
+      delete next[foundPeer]
       return next
     })
-  }, [userId])
+
+    void (async () => {
+      try {
+        if (typeof window === "undefined" || !("indexedDB" in window)) {
+          return
+        }
+
+        const db = await openHistoryDb()
+        const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readwrite")
+        const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
+        const getRequest = store.get(userId)
+
+        getRequest.onsuccess = () => {
+          const record = getRequest.result as
+            | { userId: string; messagesByPeer: Record<string, ChatMessage[]> }
+            | undefined
+
+          if (record) {
+            const nextByPeer = { ...record.messagesByPeer }
+
+            for (const key of Object.keys(nextByPeer)) {
+              if (key.trim().toLowerCase() === normalizedPeerId) {
+                delete nextByPeer[key]
+                break
+              }
+            }
+
+            store.put({
+              userId,
+              messagesByPeer: nextByPeer,
+              updatedAt: Date.now(),
+            })
+          }
+        }
+
+        tx.oncomplete = () => {
+          db.close()
+        }
+      } catch {
+        // Ignore IndexedDB errors
+      }
+    })()
+  }, [userId, openHistoryDb])
 
   return {
     onlineUsers,
@@ -514,6 +630,7 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
     status,
     error,
     sendMessage,
+    sendImageMessage,
     clearChat,
   }
 }
