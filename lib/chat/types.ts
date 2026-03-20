@@ -27,6 +27,12 @@ export interface SaveUsernameResponse {
   username: string
 }
 
+export interface UserDirectoryEntry {
+  user_id?: string | null
+  username?: string | null
+  email?: string | null
+}
+
 export type WsClientEvent =
   | { type: "register", token: string }
   | { type: "get_online_users" }

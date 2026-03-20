@@ -1,13 +1,14 @@
 "use client"
 import { useEffect, useState, useRef } from "react"
 import { useChatSocket } from "@/hooks/useChatSocket"
-import { requestOtp, saveUsername, verifyOtp } from "@/lib/chat/authApi"
+import { fetchAllUsers, requestOtp, saveUsername, verifyOtp } from "@/lib/chat/authApi"
 import { LoginView } from "@/app/components/chat/LoginView"
 import { UsernameSetupView } from "@/app/components/chat/UsernameSetupView"
 import { ChatLayout } from "@/app/components/chat/ChatLayout"
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://127.0.0.1:8080/ws"
 const SESSION_STORAGE_KEY = "chat_auth_session"
+const FRIENDS_STORAGE_KEY_PREFIX = "chat_friends_"
 const BACKEND_MAX_WS_TEXT_LENGTH = 4000
 const BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH = 6 * 1024 * 1024
 
@@ -26,6 +27,10 @@ type AuthSession = {
   email: string
   username: string | null
   needsUsernameSetup: boolean
+}
+
+function normalizeIdentity(value: string) {
+  return value.trim().toLowerCase()
 }
 
 export default function ChatPage() {
@@ -73,6 +78,11 @@ export default function ChatPage() {
 
   const [targetUser, setTargetUser] = useState<string | null>(null)
   const [message, setMessage] = useState("")
+  const [friends, setFriends] = useState<string[]>([])
+  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false)
+  const [allUsers, setAllUsers] = useState<string[]>([])
+  const [allUsersLoading, setAllUsersLoading] = useState(false)
+  const [allUsersError, setAllUsersError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
   const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, sendImageMessage, clearChat } = useChatSocket({
@@ -176,11 +186,124 @@ export default function ChatPage() {
   }
 
   useEffect(() => {
+    if (!userId) {
+      queueMicrotask(() => {
+        setFriends([])
+      })
+      return
+    }
+
+    const key = `${FRIENDS_STORAGE_KEY_PREFIX}${userId}`
+    const raw = localStorage.getItem(key)
+
+    if (!raw) {
+      queueMicrotask(() => {
+        setFriends([])
+      })
+      return
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      const storedFriends = Array.isArray(parsed)
+        ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
+        : []
+
+      queueMicrotask(() => {
+        setFriends(Array.from(new Set(storedFriends)))
+      })
+    } catch {
+      localStorage.removeItem(key)
+      queueMicrotask(() => {
+        setFriends([])
+      })
+    }
+  }, [userId])
+
+  useEffect(() => {
+    if (!userId) {
+      return
+    }
+
+    const key = `${FRIENDS_STORAGE_KEY_PREFIX}${userId}`
+    localStorage.setItem(key, JSON.stringify(friends))
+  }, [friends, userId])
+
+  useEffect(() => {
     scrollToBottom()
   }, [messagesByPeer, targetUser])
 
   const startChat = (otherId: string) => {
     setTargetUser(otherId)
+  }
+
+  const onOpenAddUserModal = async () => {
+    if (!authSession?.token) {
+      return
+    }
+
+    setIsAddUserModalOpen(true)
+    setAllUsersLoading(true)
+    setAllUsersError(null)
+
+    try {
+      const users = await fetchAllUsers(authSession.token)
+      const normalizedSelf = normalizeIdentity(displayName || userId)
+      const deduped = Array.from(new Set(users))
+      const filtered = deduped.filter((candidate) => normalizeIdentity(candidate) !== normalizedSelf)
+      setAllUsers(filtered)
+    } catch (err) {
+      setAllUsers([])
+      setAllUsersError(err instanceof Error ? err.message : "Could not load users")
+    } finally {
+      setAllUsersLoading(false)
+    }
+  }
+
+  const onCloseAddUserModal = () => {
+    setIsAddUserModalOpen(false)
+  }
+
+  const onAddFriend = (friendId: string) => {
+    const candidate = friendId.trim()
+    if (!candidate) {
+      return
+    }
+
+    const normalizedCandidate = normalizeIdentity(candidate)
+    const normalizedSelf = normalizeIdentity(displayName || userId)
+    if (normalizedCandidate === normalizedSelf) {
+      return
+    }
+
+    setFriends((prev) => {
+      const hasFriend = prev.some((friend) => normalizeIdentity(friend) === normalizedCandidate)
+      if (hasFriend) {
+        return prev
+      }
+
+      return [...prev, candidate]
+    })
+
+    setTargetUser(candidate)
+    setIsAddUserModalOpen(false)
+  }
+
+  const onRemoveFriend = (friendId: string) => {
+    const candidate = friendId.trim()
+    if (!candidate) {
+      return
+    }
+
+    const normalizedCandidate = normalizeIdentity(candidate)
+
+    clearChat(candidate)
+    setFriends((prev) => prev.filter((friend) => normalizeIdentity(friend) !== normalizedCandidate))
+
+    if (targetUser && normalizeIdentity(targetUser) === normalizedCandidate) {
+      setTargetUser(null)
+      setMessage("")
+    }
   }
 
   const onClearChat = () => {
@@ -354,6 +477,11 @@ export default function ChatPage() {
     setTargetUser(null)
     setMessage("")
     setAuthError(null)
+    setFriends([])
+    setIsAddUserModalOpen(false)
+    setAllUsers([])
+    setAllUsersLoading(false)
+    setAllUsersError(null)
   }
 
   if (!authSession) {
@@ -388,14 +516,23 @@ export default function ChatPage() {
 
   return (
     <ChatLayout
+      friends={friends}
       onlineUsers={onlineUsers}
       targetUser={targetUser}
       displayName={displayName}
       userId={userId}
       message={message}
       currentMessages={currentMessages}
+      isAddUserModalOpen={isAddUserModalOpen}
+      allUsers={allUsers}
+      allUsersLoading={allUsersLoading}
+      allUsersError={allUsersError}
       messagesEndRef={messagesEndRef}
       onStartChat={startChat}
+      onOpenAddUserModal={onOpenAddUserModal}
+      onCloseAddUserModal={onCloseAddUserModal}
+      onAddFriend={onAddFriend}
+      onRemoveFriend={onRemoveFriend}
       onClearChat={onClearChat}
       onLogout={onLogout}
       onMessageChange={setMessage}
