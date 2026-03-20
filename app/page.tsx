@@ -289,6 +289,23 @@ export default function ChatPage() {
     setIsAddUserModalOpen(false)
   }
 
+  const onRemoveFriend = (friendId: string) => {
+    const candidate = friendId.trim()
+    if (!candidate) {
+      return
+    }
+
+    const normalizedCandidate = normalizeIdentity(candidate)
+
+    clearChat(candidate)
+    setFriends((prev) => prev.filter((friend) => normalizeIdentity(friend) !== normalizedCandidate))
+
+    if (targetUser && normalizeIdentity(targetUser) === normalizedCandidate) {
+      setTargetUser(null)
+      setMessage("")
+    }
+  }
+
   const onClearChat = () => {
     if (!targetUser) {
       return
@@ -515,6 +532,7 @@ export default function ChatPage() {
       onOpenAddUserModal={onOpenAddUserModal}
       onCloseAddUserModal={onCloseAddUserModal}
       onAddFriend={onAddFriend}
+      onRemoveFriend={onRemoveFriend}
       onClearChat={onClearChat}
       onLogout={onLogout}
       onMessageChange={setMessage}

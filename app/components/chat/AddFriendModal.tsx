@@ -49,19 +49,25 @@ export function AddFriendModal({
   })
 
   return (
-    <GenericModal isOpen={isOpen} title="Add Friend" onClose={onClose}>
-      {allUsersLoading && <p className="text-sm text-gray-400">Loading users...</p>}
+    <GenericModal
+      isOpen={isOpen}
+      title="Add Friend"
+      onClose={onClose}
+      panelClassName="max-w-lg"
+      bodyClassName="min-h-[320px]"
+    >
+      {allUsersLoading && <p className="pt-2 text-sm text-gray-400">Loading users...</p>}
 
       {!allUsersLoading && allUsersError && (
         <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{allUsersError}</p>
       )}
 
       {!allUsersLoading && !allUsersError && addableUsers.length === 0 && (
-        <p className="text-sm text-gray-400">No users available to add right now.</p>
+        <p className="pt-2 text-sm text-gray-400">No users available to add right now.</p>
       )}
 
       {!allUsersLoading && !allUsersError && addableUsers.length > 0 && (
-        <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+        <div className="h-72 space-y-2 overflow-y-auto pr-1">
           {addableUsers.map((candidate) => (
             <div key={candidate} className="flex items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2">
               <span className="truncate text-sm text-gray-100">{candidate}</span>

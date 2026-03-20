@@ -1,8 +1,9 @@
-import { useRef } from "react"
+import { useRef, useState } from "react"
 import type { ChangeEvent, FormEvent, RefObject } from "react"
 import Image from "next/image"
 import type { ChatMessage } from "@/lib/chat/types"
 import { AddFriendModal } from "@/app/components/chat/AddFriendModal"
+import { ConfirmModal } from "@/app/components/chat/ConfirmModal"
 
 type MessageGroup = {
   fromUserId: string
@@ -32,6 +33,7 @@ type ChatLayoutProps = {
   onOpenAddUserModal: () => void
   onCloseAddUserModal: () => void
   onAddFriend: (userId: string) => void
+  onRemoveFriend: (userId: string) => void
   onClearChat: () => void
   onLogout: () => void
   onMessageChange: (value: string) => void
@@ -96,6 +98,7 @@ export function ChatLayout({
   onOpenAddUserModal,
   onCloseAddUserModal,
   onAddFriend,
+  onRemoveFriend,
   onClearChat,
   onLogout,
   onMessageChange,
@@ -104,6 +107,7 @@ export function ChatLayout({
 }: ChatLayoutProps) {
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
   const normalizedDisplayName = displayName.trim().toLowerCase()
   const normalizedUserId = userId.trim().toLowerCase()
   const onlineUsersSet = new Set(onlineUsers.map((u) => u.trim().toLowerCase()))
@@ -125,6 +129,23 @@ export function ChatLayout({
     event.target.value = ""
   }
 
+  const onRequestRemoveFriend = (friendId: string) => {
+    setFriendToRemove(friendId)
+  }
+
+  const onCancelRemoveFriend = () => {
+    setFriendToRemove(null)
+  }
+
+  const onConfirmRemoveFriend = () => {
+    if (!friendToRemove) {
+      return
+    }
+
+    onRemoveFriend(friendToRemove)
+    setFriendToRemove(null)
+  }
+
   return (
     <div className="flex h-screen bg-gray-900 text-white font-sans">
       <div className="w-1/4 border-r border-gray-700 p-4 overflow-y-auto bg-gray-800 flex flex-col">
@@ -141,22 +162,34 @@ export function ChatLayout({
         <div className="space-y-2 flex-1">
           {visibleFriends.length === 0 && <p className="text-gray-500 text-sm">No friends added yet.</p>}
           {visibleFriends.map((u) => (
-            <button
+            <div
               key={u}
-              onClick={() => onStartChat(u)}
-              className={`w-full text-left p-3 rounded-lg transition ${
-                targetUser === u ? "bg-blue-600 shadow-lg" : "hover:bg-gray-700 bg-gray-750"
+              className={`flex items-center gap-2 rounded-lg p-2 transition ${
+                targetUser === u ? "bg-blue-600 shadow-lg" : "bg-gray-750 hover:bg-gray-700"
               }`}
             >
-              <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => onStartChat(u)}
+                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              >
                 <div
-                  className={`w-3 h-3 rounded-full ${
+                  className={`h-3 w-3 rounded-full ${
                     targetUser === u ? "bg-white" : (onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500")
                   }`}
                 ></div>
                 <span className="truncate">{u}</span>
-              </div>
-            </button>
+              </button>
+              <button
+                type="button"
+                aria-label={`Remove ${u}`}
+                title={`Remove ${u}`}
+                onClick={() => onRequestRemoveFriend(u)}
+                className="rounded-md px-2 py-1 text-xs font-bold text-gray-200 transition hover:bg-black/20 hover:text-white"
+              >
+                x
+              </button>
+            </div>
           ))}
         </div>
         <div className="mt-4 pt-4 border-t border-gray-700 opacity-50 text-xs text-center">
@@ -183,6 +216,21 @@ export function ChatLayout({
         allUsersError={allUsersError}
         onClose={onCloseAddUserModal}
         onAddFriend={onAddFriend}
+      />
+
+      <ConfirmModal
+        isOpen={Boolean(friendToRemove)}
+        title="Delete friend?"
+        description={
+          friendToRemove
+            ? `Are you sure you want to delete ${friendToRemove}? This will also clear this chat on your device.`
+            : undefined
+        }
+        confirmText="Delete friend and chat"
+        cancelText="Keep"
+        intent="danger"
+        onConfirm={onConfirmRemoveFriend}
+        onCancel={onCancelRemoveFriend}
       />
 
       <div className="flex-1 flex flex-col">
