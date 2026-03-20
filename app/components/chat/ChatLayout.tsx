@@ -15,14 +15,22 @@ type MessageGroup = {
 }
 
 type ChatLayoutProps = {
+  friends: string[]
   onlineUsers: string[]
   targetUser: string | null
   displayName: string
   userId: string
   message: string
   currentMessages: ChatMessage[]
+  isAddUserModalOpen: boolean
+  allUsers: string[]
+  allUsersLoading: boolean
+  allUsersError: string | null
   messagesEndRef: RefObject<HTMLDivElement | null>
   onStartChat: (otherId: string) => void
+  onOpenAddUserModal: () => void
+  onCloseAddUserModal: () => void
+  onAddFriend: (userId: string) => void
   onClearChat: () => void
   onLogout: () => void
   onMessageChange: (value: string) => void
@@ -71,14 +79,22 @@ function groupMessages(currentMessages: ChatMessage[]) {
 }
 
 export function ChatLayout({
+  friends,
   onlineUsers,
   targetUser,
   displayName,
   userId,
   message,
   currentMessages,
+  isAddUserModalOpen,
+  allUsers,
+  allUsersLoading,
+  allUsersError,
   messagesEndRef,
   onStartChat,
+  onOpenAddUserModal,
+  onCloseAddUserModal,
+  onAddFriend,
   onClearChat,
   onLogout,
   onMessageChange,
@@ -89,9 +105,23 @@ export function ChatLayout({
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const normalizedDisplayName = displayName.trim().toLowerCase()
   const normalizedUserId = userId.trim().toLowerCase()
-  const visibleOnlineUsers = onlineUsers.filter((u) => {
+  const onlineUsersSet = new Set(onlineUsers.map((u) => u.trim().toLowerCase()))
+  const visibleFriends = friends.filter((u) => {
     const normalized = u.trim().toLowerCase()
     return normalized !== normalizedDisplayName && normalized !== normalizedUserId
+  })
+
+  const addableUsers = allUsers.filter((candidate) => {
+    const normalizedCandidate = candidate.trim().toLowerCase()
+    if (!normalizedCandidate) {
+      return false
+    }
+
+    if (normalizedCandidate === normalizedDisplayName || normalizedCandidate === normalizedUserId) {
+      return false
+    }
+
+    return !visibleFriends.some((friend) => friend.trim().toLowerCase() === normalizedCandidate)
   })
 
   const onImagePickerClick = () => {
@@ -110,10 +140,19 @@ export function ChatLayout({
   return (
     <div className="flex h-screen bg-gray-900 text-white font-sans">
       <div className="w-1/4 border-r border-gray-700 p-4 overflow-y-auto bg-gray-800 flex flex-col">
-        <h2 className="text-xl font-bold mb-6 text-blue-400">Active Users</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-xl font-bold text-blue-400">Friends</h2>
+          <button
+            type="button"
+            onClick={onOpenAddUserModal}
+            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold transition hover:bg-blue-500"
+          >
+            Add Friend
+          </button>
+        </div>
         <div className="space-y-2 flex-1">
-          {visibleOnlineUsers.length === 0 && <p className="text-gray-500 text-sm">No one is online...</p>}
-          {visibleOnlineUsers.map((u) => (
+          {visibleFriends.length === 0 && <p className="text-gray-500 text-sm">No friends added yet.</p>}
+          {visibleFriends.map((u) => (
             <button
               key={u}
               onClick={() => onStartChat(u)}
@@ -122,7 +161,11 @@ export function ChatLayout({
               }`}
             >
               <div className="flex items-center gap-3">
-                <div className={`w-3 h-3 rounded-full ${targetUser === u ? "bg-white" : "bg-green-500"}`}></div>
+                <div
+                  className={`w-3 h-3 rounded-full ${
+                    targetUser === u ? "bg-white" : (onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500")
+                  }`}
+                ></div>
                 <span className="truncate">{u}</span>
               </div>
             </button>
@@ -141,6 +184,50 @@ export function ChatLayout({
           </div>
         </div>
       </div>
+
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl border border-gray-700 bg-gray-900 p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h4 className="text-lg font-bold text-blue-300">Add Friend</h4>
+              <button
+                type="button"
+                onClick={onCloseAddUserModal}
+                className="rounded-md border border-gray-600 px-2 py-1 text-xs text-gray-300 hover:bg-gray-800"
+              >
+                Close
+              </button>
+            </div>
+
+            {allUsersLoading && <p className="text-sm text-gray-400">Loading users...</p>}
+
+            {!allUsersLoading && allUsersError && (
+              <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{allUsersError}</p>
+            )}
+
+            {!allUsersLoading && !allUsersError && addableUsers.length === 0 && (
+              <p className="text-sm text-gray-400">No users available to add right now.</p>
+            )}
+
+            {!allUsersLoading && !allUsersError && addableUsers.length > 0 && (
+              <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
+                {addableUsers.map((candidate) => (
+                  <div key={candidate} className="flex items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2">
+                    <span className="truncate text-sm text-gray-100">{candidate}</span>
+                    <button
+                      type="button"
+                      onClick={() => onAddFriend(candidate)}
+                      className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold hover:bg-emerald-500"
+                    >
+                      Add
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex flex-col">
         {targetUser ? (
