@@ -96,30 +96,33 @@ export default function ChatPage() {
   const [allUsersLoading, setAllUsersLoading] = useState(false)
   const [allUsersError, setAllUsersError] = useState<string | null>(null)
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
+  const knownAcceptedFriendsRef = useRef<Set<string>>(new Set())
+  const friendsInitializedRef = useRef(false)
 
   const applyFriendSnapshot = useCallback((snapshot: FriendSnapshot) => {
     const accepted = Array.from(new Set(snapshot.accepted_friends.map((item) => normalizeIdentity(item))))
     const incoming = Array.from(new Set(snapshot.incoming_requests.map((item) => normalizeIdentity(item))))
     const outgoing = Array.from(new Set(snapshot.outgoing_requests.map((item) => normalizeIdentity(item))))
 
+    if (friendsInitializedRef.current) {
+      const newlyAccepted = accepted.filter((friend) => !knownAcceptedFriendsRef.current.has(friend))
+      if (newlyAccepted.length > 0) {
+        setTargetUser(newlyAccepted[0])
+      }
+    }
+
+    knownAcceptedFriendsRef.current = new Set(accepted)
+    friendsInitializedRef.current = true
+
     setFriends(accepted)
     setIncomingRequests(incoming)
     setOutgoingRequests(outgoing)
   }, [])
 
-  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, sendImageMessage, clearChat } = useChatSocket({
+  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, sendImageMessage, clearChat, status: wsStatus } = useChatSocket({
     userId,
     token,
     wsUrl: WS_URL,
-    onFriendSnapshot: applyFriendSnapshot,
-    onFriendRequestAccepted: (username) => {
-      const normalized = normalizeIdentity(username)
-      if (!normalized) {
-        return
-      }
-
-      setTargetUser(normalized)
-    },
   })
 
   const fileToDataUrl = (file: File) => {
@@ -248,6 +251,30 @@ export default function ChatPage() {
     return () => {
       cancelled = true
     }
+  }, [applyFriendSnapshot, authSession?.token, userId])
+
+  useEffect(() => {
+    if (wsStatus !== "open" || !authSession?.token) {
+      return
+    }
+
+    void fetchFriendSnapshot(authSession.token)
+      .then((snapshot) => applyFriendSnapshot(snapshot))
+      .catch(() => { })
+  }, [wsStatus, applyFriendSnapshot, authSession?.token])
+
+  useEffect(() => {
+    if (!authSession?.token || !userId) {
+      return
+    }
+
+    const intervalId = setInterval(() => {
+      void fetchFriendSnapshot(authSession.token)
+        .then((snapshot) => applyFriendSnapshot(snapshot))
+        .catch(() => { })
+    }, 10000)
+
+    return () => clearInterval(intervalId)
   }, [applyFriendSnapshot, authSession?.token, userId])
 
   useEffect(() => {
@@ -528,6 +555,8 @@ export default function ChatPage() {
     setFriends([])
     setIncomingRequests([])
     setOutgoingRequests([])
+    knownAcceptedFriendsRef.current = new Set()
+    friendsInitializedRef.current = false
     setFriendActionLoading(false)
     setFriendActionError(null)
     setIsAddUserModalOpen(false)

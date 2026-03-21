@@ -56,13 +56,6 @@ export type ConnectionStatus = "idle" | "connecting" | "open" | "closed" | "erro
 export type WsServerEvent =
   | { type: "registered", username: string }
   | { type: "online_users", users: string[] }
-  | {
-    type: "friend_snapshot"
-    accepted_friends: string[]
-    incoming_requests: string[]
-    outgoing_requests: string[]
-  }
-  | { type: "friend_request_accepted", username: string }
   | { type: "inbox", messages: ChatMessage[] }
   | { type: "new_message", message: ChatMessage }
   | { type: "message_queued", message_id: string, client_message_id?: string }
