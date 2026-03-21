@@ -5,6 +5,7 @@ import {
   acceptFriendRequest,
   fetchAllUsers,
   fetchFriendSnapshot,
+  removeFriend,
   requestOtp,
   saveUsername,
   sendFriendRequest,
@@ -381,6 +382,41 @@ export default function ChatPage() {
     }
   }
 
+  const onRemoveFriend = async (friendUsername: string) => {
+    if (!authSession?.token) {
+      return
+    }
+
+    const normalized = normalizeIdentity(friendUsername)
+    if (!normalized) {
+      return
+    }
+
+    setFriendActionLoading(true)
+    setFriendActionError(null)
+
+    try {
+      await removeFriend(authSession.token, normalized)
+
+      clearChat(normalized)
+      setFriends((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
+      setIncomingRequests((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
+      setOutgoingRequests((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
+
+      if (targetUser && normalizeIdentity(targetUser) === normalized) {
+        setTargetUser(null)
+        setMessage("")
+      }
+
+      const snapshot = await fetchFriendSnapshot(authSession.token)
+      applyFriendSnapshot(snapshot)
+    } catch (err) {
+      setFriendActionError(err instanceof Error ? err.message : "Could not remove friend")
+    } finally {
+      setFriendActionLoading(false)
+    }
+  }
+
   const onClearChat = () => {
     if (!targetUser) {
       return
@@ -618,6 +654,7 @@ export default function ChatPage() {
       onCloseAddUserModal={onCloseAddUserModal}
       onSendFriendRequest={onSendFriendRequest}
       onAcceptFriendRequest={onAcceptFriendRequest}
+      onRemoveFriend={onRemoveFriend}
       onClearChat={onClearChat}
       onLogout={onLogout}
       onMessageChange={setMessage}

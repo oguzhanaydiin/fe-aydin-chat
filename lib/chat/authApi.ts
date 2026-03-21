@@ -171,3 +171,17 @@ export async function acceptFriendRequest(token: string, fromUsername: string): 
     throw new Error(message || "Failed to accept friend request")
   }
 }
+
+export async function removeFriend(token: string, username: string): Promise<void> {
+  const response = await fetch(`${API_URL}/friends/${encodeURIComponent(username)}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to remove friend")
+  }
+}
