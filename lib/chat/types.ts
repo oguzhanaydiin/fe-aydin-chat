@@ -33,6 +33,12 @@ export interface UserDirectoryEntry {
   email?: string | null
 }
 
+export interface FriendSnapshot {
+  accepted_friends: string[]
+  incoming_requests: string[]
+  outgoing_requests: string[]
+}
+
 export type WsClientEvent =
   | { type: "register", token: string }
   | { type: "get_online_users" }
@@ -48,7 +54,7 @@ export type WsClientEvent =
 export type ConnectionStatus = "idle" | "connecting" | "open" | "closed" | "error"
 
 export type WsServerEvent =
-  | { type: "registered", user_id: string }
+  | { type: "registered", username: string }
   | { type: "online_users", users: string[] }
   | { type: "inbox", messages: ChatMessage[] }
   | { type: "new_message", message: ChatMessage }

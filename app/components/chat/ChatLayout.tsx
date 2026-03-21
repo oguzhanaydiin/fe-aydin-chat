@@ -4,6 +4,7 @@ import Image from "next/image"
 import type { ChatMessage } from "@/lib/chat/types"
 import { AddFriendModal } from "@/app/components/chat/AddFriendModal"
 import { ConfirmModal } from "@/app/components/chat/ConfirmModal"
+import { FriendListModal } from "@/app/components/chat/FriendListModal"
 
 type MessageGroup = {
   fromUserId: string
@@ -18,6 +19,8 @@ type MessageGroup = {
 
 type ChatLayoutProps = {
   friends: string[]
+  incomingRequests: string[]
+  outgoingRequests: string[]
   onlineUsers: string[]
   targetUser: string | null
   displayName: string
@@ -28,11 +31,14 @@ type ChatLayoutProps = {
   allUsers: string[]
   allUsersLoading: boolean
   allUsersError: string | null
+  friendActionLoading: boolean
+  friendActionError: string | null
   messagesEndRef: RefObject<HTMLDivElement | null>
   onStartChat: (otherId: string) => void
   onOpenAddUserModal: () => void
   onCloseAddUserModal: () => void
-  onAddFriend: (userId: string) => void
+  onSendFriendRequest: (userId: string) => void
+  onAcceptFriendRequest: (userId: string) => void
   onRemoveFriend: (userId: string) => void
   onClearChat: () => void
   onLogout: () => void
@@ -83,6 +89,8 @@ function groupMessages(currentMessages: ChatMessage[]) {
 
 export function ChatLayout({
   friends,
+  incomingRequests,
+  outgoingRequests,
   onlineUsers,
   targetUser,
   displayName,
@@ -93,11 +101,14 @@ export function ChatLayout({
   allUsers,
   allUsersLoading,
   allUsersError,
+  friendActionLoading,
+  friendActionError,
   messagesEndRef,
   onStartChat,
   onOpenAddUserModal,
   onCloseAddUserModal,
-  onAddFriend,
+  onSendFriendRequest,
+  onAcceptFriendRequest,
   onRemoveFriend,
   onClearChat,
   onLogout,
@@ -108,6 +119,7 @@ export function ChatLayout({
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
+  const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
   const normalizedDisplayName = displayName.trim().toLowerCase()
   const normalizedUserId = userId.trim().toLowerCase()
   const onlineUsersSet = new Set(onlineUsers.map((u) => u.trim().toLowerCase()))
@@ -127,6 +139,14 @@ export function ChatLayout({
     }
 
     event.target.value = ""
+  }
+
+  const onOpenFriendListModal = () => {
+    setIsFriendListModalOpen(true)
+  }
+
+  const onCloseFriendListModal = () => {
+    setIsFriendListModalOpen(false)
   }
 
   const onRequestRemoveFriend = (friendId: string) => {
@@ -151,13 +171,22 @@ export function ChatLayout({
       <div className="w-1/4 border-r border-gray-700 p-4 overflow-y-auto bg-gray-800 flex flex-col">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-xl font-bold text-blue-400">Friends</h2>
-          <button
-            type="button"
-            onClick={onOpenAddUserModal}
-            className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold transition hover:bg-blue-500"
-          >
-            Add Friend
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onOpenFriendListModal}
+              className="rounded-md border border-gray-600 px-3 py-1.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-700"
+            >
+              Friend List
+            </button>
+            <button
+              type="button"
+              onClick={onOpenAddUserModal}
+              className="rounded-md bg-blue-600 px-3 py-1.5 text-xs font-semibold transition hover:bg-blue-500"
+            >
+              Add Friend
+            </button>
+          </div>
         </div>
         <div className="space-y-2 flex-1">
           {visibleFriends.length === 0 && <p className="text-gray-500 text-sm">No friends added yet.</p>}
@@ -191,6 +220,42 @@ export function ChatLayout({
               </button>
             </div>
           ))}
+
+          {incomingRequests.length > 0 && (
+            <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-300">Incoming Requests</p>
+              <div className="space-y-2">
+                {incomingRequests.map((requester) => (
+                  <div key={requester} className="flex items-center justify-between gap-2 rounded-md border border-amber-800/40 bg-black/20 px-2 py-1.5">
+                    <span className="truncate text-sm text-amber-100">{requester}</span>
+                    <button
+                      type="button"
+                      disabled={friendActionLoading}
+                      onClick={() => onAcceptFriendRequest(requester)}
+                      className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Accept
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {outgoingRequests.length > 0 && (
+            <div className="mt-3 rounded-lg border border-blue-700/40 bg-blue-950/20 p-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-blue-300">Sent Requests</p>
+              <div className="space-y-1">
+                {outgoingRequests.map((target) => (
+                  <p key={target} className="truncate text-sm text-blue-100">{target}</p>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {friendActionError && (
+            <p className="mt-3 rounded-md border border-red-900 bg-red-950 px-2 py-1.5 text-xs text-red-300">{friendActionError}</p>
+          )}
         </div>
         <div className="mt-4 pt-4 border-t border-gray-700 opacity-50 text-xs text-center">
           You: <span className="font-mono text-blue-300">{displayName}</span>
@@ -210,12 +275,27 @@ export function ChatLayout({
         isOpen={isAddUserModalOpen}
         allUsers={allUsers}
         friends={friends}
+        incomingRequests={incomingRequests}
+        outgoingRequests={outgoingRequests}
         displayName={displayName}
         userId={userId}
         allUsersLoading={allUsersLoading}
         allUsersError={allUsersError}
+        actionLoading={friendActionLoading}
+        actionError={friendActionError}
         onClose={onCloseAddUserModal}
-        onAddFriend={onAddFriend}
+        onSendFriendRequest={onSendFriendRequest}
+      />
+
+      <FriendListModal
+        isOpen={isFriendListModalOpen}
+        friends={friends}
+        onlineUsers={onlineUsers}
+        displayName={displayName}
+        userId={userId}
+        targetUser={targetUser}
+        onClose={onCloseFriendListModal}
+        onStartChat={onStartChat}
       />
 
       <ConfirmModal
@@ -223,10 +303,10 @@ export function ChatLayout({
         title="Delete friend?"
         description={
           friendToRemove
-            ? `Are you sure you want to delete ${friendToRemove}? This will also clear this chat on your device.`
+            ? `Are you sure you want to delete ${friendToRemove}? This removes the friendship and clears chat on this device.`
             : undefined
         }
-        confirmText="Delete friend and chat"
+        confirmText="Delete friend"
         cancelText="Keep"
         intent="danger"
         onConfirm={onConfirmRemoveFriend}

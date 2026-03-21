@@ -4,12 +4,16 @@ type AddFriendModalProps = {
   isOpen: boolean
   allUsers: string[]
   friends: string[]
+  incomingRequests: string[]
+  outgoingRequests: string[]
   displayName: string
   userId: string
   allUsersLoading: boolean
   allUsersError: string | null
+  actionLoading: boolean
+  actionError: string | null
   onClose: () => void
-  onAddFriend: (userId: string) => void
+  onSendFriendRequest: (userId: string) => void
 }
 
 function normalizeIdentity(value: string) {
@@ -20,12 +24,16 @@ export function AddFriendModal({
   isOpen,
   allUsers,
   friends,
+  incomingRequests,
+  outgoingRequests,
   displayName,
   userId,
   allUsersLoading,
   allUsersError,
+  actionLoading,
+  actionError,
   onClose,
-  onAddFriend,
+  onSendFriendRequest,
 }: AddFriendModalProps) {
   const normalizedDisplayName = normalizeIdentity(displayName)
   const normalizedUserId = normalizeIdentity(userId)
@@ -34,6 +42,9 @@ export function AddFriendModal({
     const normalized = normalizeIdentity(friend)
     return normalized && normalized !== normalizedDisplayName && normalized !== normalizedUserId
   })
+
+  const incomingSet = new Set(incomingRequests.map((candidate) => normalizeIdentity(candidate)))
+  const outgoingSet = new Set(outgoingRequests.map((candidate) => normalizeIdentity(candidate)))
 
   const addableUsers = allUsers.filter((candidate) => {
     const normalizedCandidate = normalizeIdentity(candidate)
@@ -45,7 +56,9 @@ export function AddFriendModal({
       return false
     }
 
-    return !visibleFriends.some((friend) => normalizeIdentity(friend) === normalizedCandidate)
+    const isFriend = visibleFriends.some((friend) => normalizeIdentity(friend) === normalizedCandidate)
+
+    return !isFriend
   })
 
   return (
@@ -57,6 +70,10 @@ export function AddFriendModal({
       bodyClassName="min-h-[320px]"
     >
       {allUsersLoading && <p className="pt-2 text-sm text-gray-400">Loading users...</p>}
+
+      {!allUsersLoading && actionError && (
+        <p className="mb-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{actionError}</p>
+      )}
 
       {!allUsersLoading && allUsersError && (
         <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{allUsersError}</p>
@@ -71,13 +88,25 @@ export function AddFriendModal({
           {addableUsers.map((candidate) => (
             <div key={candidate} className="flex items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2">
               <span className="truncate text-sm text-gray-100">{candidate}</span>
-              <button
-                type="button"
-                onClick={() => onAddFriend(candidate)}
-                className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold hover:bg-emerald-500"
-              >
-                Add
-              </button>
+
+              {incomingSet.has(normalizeIdentity(candidate)) ? (
+                <span className="rounded-md border border-amber-500/40 bg-amber-900/40 px-2 py-1 text-xs font-semibold text-amber-200">
+                  Incoming request
+                </span>
+              ) : outgoingSet.has(normalizeIdentity(candidate)) ? (
+                <span className="rounded-md border border-blue-500/40 bg-blue-900/40 px-2 py-1 text-xs font-semibold text-blue-200">
+                  Request sent
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={actionLoading}
+                  onClick={() => onSendFriendRequest(candidate)}
+                  className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-500"
+                >
+                  Send Request
+                </button>
+              )}
             </div>
           ))}
         </div>

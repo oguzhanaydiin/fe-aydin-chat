@@ -9,7 +9,11 @@ interface UseChatSocketOptions {
   wsUrl: string
 }
 
-export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
+export function useChatSocket({
+  userId,
+  token,
+  wsUrl,
+}: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
   const CHAT_HISTORY_DB_NAME = "chat_history_db"
   const CHAT_HISTORY_STORE_NAME = "histories"
@@ -400,7 +404,16 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         scheduleReconnect()
       }
     }
-  }, [appendMessage, markOutgoingMessageAsDelivered, normalizeIncomingMessage, scheduleReconnect, sendEvent, token, userId, wsUrl])
+  }, [
+    appendMessage,
+    markOutgoingMessageAsDelivered,
+    normalizeIncomingMessage,
+    scheduleReconnect,
+    sendEvent,
+    token,
+    userId,
+    wsUrl,
+  ])
 
   useEffect(() => {
     connectRef.current = connect
