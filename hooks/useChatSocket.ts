@@ -1,15 +1,23 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/lib/chat/types"
+import { ChatMessage, ConnectionStatus, FriendSnapshot, WsClientEvent, WsServerEvent } from "@/lib/chat/types"
 
 interface UseChatSocketOptions {
   userId: string
   token: string
   wsUrl: string
+  onFriendSnapshot?: (snapshot: FriendSnapshot) => void
+  onFriendRequestAccepted?: (username: string) => void
 }
 
-export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
+export function useChatSocket({
+  userId,
+  token,
+  wsUrl,
+  onFriendSnapshot,
+  onFriendRequestAccepted,
+}: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
   const CHAT_HISTORY_DB_NAME = "chat_history_db"
   const CHAT_HISTORY_STORE_NAME = "histories"
@@ -287,6 +295,20 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
           return
         }
 
+        if (data.type === "friend_snapshot") {
+          onFriendSnapshot?.({
+            accepted_friends: data.accepted_friends,
+            incoming_requests: data.incoming_requests,
+            outgoing_requests: data.outgoing_requests,
+          })
+          return
+        }
+
+        if (data.type === "friend_request_accepted") {
+          onFriendRequestAccepted?.(data.username)
+          return
+        }
+
         if (data.type === "inbox") {
           const receivedIds: string[] = []
           data.messages.forEach((msg) => {
@@ -400,7 +422,18 @@ export function useChatSocket({ userId, token, wsUrl }: UseChatSocketOptions) {
         scheduleReconnect()
       }
     }
-  }, [appendMessage, markOutgoingMessageAsDelivered, normalizeIncomingMessage, scheduleReconnect, sendEvent, token, userId, wsUrl])
+  }, [
+    appendMessage,
+    markOutgoingMessageAsDelivered,
+    normalizeIncomingMessage,
+    onFriendRequestAccepted,
+    onFriendSnapshot,
+    scheduleReconnect,
+    sendEvent,
+    token,
+    userId,
+    wsUrl,
+  ])
 
   useEffect(() => {
     connectRef.current = connect
