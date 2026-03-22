@@ -196,7 +196,9 @@ export function ChatLayout({
             <div
               key={u}
               className={`relative flex items-center gap-2 rounded-lg p-2 transition ${
-                targetUser === u ? "bg-blue-600 shadow-lg" : "bg-gray-750 hover:bg-gray-700"
+                targetUser === u
+                  ? "bg-slate-600/45 border border-slate-400/45 shadow-sm"
+                  : "bg-slate-700/35 border border-slate-500/35 hover:bg-slate-600/40"
               }`}
             >
               {(() => {
@@ -218,7 +220,7 @@ export function ChatLayout({
               >
                 <div
                   className={`h-3 w-3 rounded-full ${
-                    targetUser === u ? "bg-white" : (onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500")
+                    onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500"
                   }`}
                 ></div>
                 <span className="truncate">{u}</span>
