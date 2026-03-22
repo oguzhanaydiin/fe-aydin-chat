@@ -96,11 +96,13 @@ export default function ChatPage() {
   const [allUsers, setAllUsers] = useState<string[]>([])
   const [allUsersLoading, setAllUsersLoading] = useState(false)
   const [allUsersError, setAllUsersError] = useState<string | null>(null)
+  const [unreadCountsByPeer, setUnreadCountsByPeer] = useState<Record<string, number>>({})
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const knownAcceptedFriendsRef = useRef<Set<string>>(new Set())
   const friendsInitializedRef = useRef(false)
   const knownIncomingMessageIdsByPeerRef = useRef<Record<string, Set<string>>>({})
   const messageTrackingReadyRef = useRef(false)
+  const skipUnreadCountOnNextSyncRef = useRef(true)
   const notificationPermissionAskedRef = useRef(false)
   const audioContextRef = useRef<AudioContext | null>(null)
 
@@ -286,6 +288,63 @@ export default function ChatPage() {
     scrollToBottom()
   }, [messagesByPeer, targetUser])
 
+  useEffect(() => {
+    if (!targetUser) {
+      return
+    }
+
+    const normalizedTarget = normalizeIdentity(targetUser)
+    setUnreadCountsByPeer((prev) => {
+      if (!prev[normalizedTarget]) {
+        return prev
+      }
+
+      const next = { ...prev }
+      delete next[normalizedTarget]
+      return next
+    })
+  }, [targetUser])
+
+  useEffect(() => {
+    if (typeof document === "undefined" || !targetUser) {
+      return
+    }
+
+    const normalizedTarget = normalizeIdentity(targetUser)
+    const clearOpenChatUnreadOnVisible = () => {
+      if (document.hidden) {
+        return
+      }
+
+      setUnreadCountsByPeer((prev) => {
+        if (!prev[normalizedTarget]) {
+          return prev
+        }
+
+        const next = { ...prev }
+        delete next[normalizedTarget]
+        return next
+      })
+    }
+
+    document.addEventListener("visibilitychange", clearOpenChatUnreadOnVisible)
+    return () => {
+      document.removeEventListener("visibilitychange", clearOpenChatUnreadOnVisible)
+    }
+  }, [targetUser])
+
+  useEffect(() => {
+    if (!userId) {
+      skipUnreadCountOnNextSyncRef.current = true
+      return
+    }
+
+    if (wsStatus === "open") {
+      // First update after a fresh socket open is typically inbox sync; ignore for unread counters.
+      skipUnreadCountOnNextSyncRef.current = true
+    }
+  }, [userId, wsStatus])
+
   const playNewMessageSound = useCallback(() => {
     if (typeof window === "undefined") {
       return
@@ -390,6 +449,33 @@ export default function ChatPage() {
 
     if (newlyIncomingByPeer.length === 0) {
       return
+    }
+
+    if (skipUnreadCountOnNextSyncRef.current) {
+      skipUnreadCountOnNextSyncRef.current = false
+      return
+    }
+
+    const normalizedTarget = targetUser ? normalizeIdentity(targetUser) : null
+    const newUnreadByPeer = newlyIncomingByPeer.reduce<Record<string, number>>((acc, entry) => {
+      const normalizedPeerId = normalizeIdentity(entry.peerId)
+      const shouldMarkAsRead = normalizedTarget === normalizedPeerId && !document.hidden
+      if (shouldMarkAsRead) {
+        return acc
+      }
+
+      acc[normalizedPeerId] = (acc[normalizedPeerId] ?? 0) + 1
+      return acc
+    }, {})
+
+    if (Object.keys(newUnreadByPeer).length > 0) {
+      setUnreadCountsByPeer((prev) => {
+        const next = { ...prev }
+        Object.entries(newUnreadByPeer).forEach(([peerId, count]) => {
+          next[peerId] = (next[peerId] ?? 0) + count
+        })
+        return next
+      })
     }
 
     playNewMessageSound()
@@ -730,6 +816,7 @@ export default function ChatPage() {
     setAllUsers([])
     setAllUsersLoading(false)
     setAllUsersError(null)
+    setUnreadCountsByPeer({})
     knownIncomingMessageIdsByPeerRef.current = {}
     messageTrackingReadyRef.current = false
     notificationPermissionAskedRef.current = false
@@ -786,6 +873,7 @@ export default function ChatPage() {
       allUsersError={allUsersError}
       friendActionLoading={friendActionLoading}
       friendActionError={friendActionError}
+      unreadCountsByPeer={unreadCountsByPeer}
       messagesEndRef={messagesEndRef}
       onStartChat={startChat}
       onOpenAddUserModal={onOpenAddUserModal}
