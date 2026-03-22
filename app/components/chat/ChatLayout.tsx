@@ -33,6 +33,7 @@ type ChatLayoutProps = {
   allUsersError: string | null
   friendActionLoading: boolean
   friendActionError: string | null
+  unreadCountsByPeer: Record<string, number>
   messagesEndRef: RefObject<HTMLDivElement | null>
   onStartChat: (otherId: string) => void
   onOpenAddUserModal: () => void
@@ -103,6 +104,7 @@ export function ChatLayout({
   allUsersError,
   friendActionLoading,
   friendActionError,
+  unreadCountsByPeer,
   messagesEndRef,
   onStartChat,
   onOpenAddUserModal,
@@ -193,10 +195,24 @@ export function ChatLayout({
           {visibleFriends.map((u) => (
             <div
               key={u}
-              className={`flex items-center gap-2 rounded-lg p-2 transition ${
-                targetUser === u ? "bg-blue-600 shadow-lg" : "bg-gray-750 hover:bg-gray-700"
+              className={`relative flex items-center gap-2 rounded-lg p-2 transition ${
+                targetUser === u
+                  ? "bg-slate-600/45 border border-slate-400/45 shadow-sm"
+                  : "bg-slate-700/35 border border-slate-500/35 hover:bg-slate-600/40"
               }`}
             >
+              {(() => {
+                const unreadCount = unreadCountsByPeer[u] ?? unreadCountsByPeer[u.trim().toLowerCase()] ?? 0
+                if (unreadCount <= 0) {
+                  return null
+                }
+
+                return (
+                  <span className="absolute -top-2 -right-2 min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
+                    {unreadCount}
+                  </span>
+                )
+              })()}
               <button
                 type="button"
                 onClick={() => onStartChat(u)}
@@ -204,7 +220,7 @@ export function ChatLayout({
               >
                 <div
                   className={`h-3 w-3 rounded-full ${
-                    targetUser === u ? "bg-white" : (onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500")
+                    onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500"
                   }`}
                 ></div>
                 <span className="truncate">{u}</span>
