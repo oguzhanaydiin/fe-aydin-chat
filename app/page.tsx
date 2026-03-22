@@ -11,7 +11,7 @@ import {
   sendFriendRequest,
   verifyOtp,
 } from "@/lib/chat/authApi"
-import type { FriendSnapshot } from "@/lib/chat/types"
+import type { ChatMessage, FriendSnapshot } from "@/lib/chat/types"
 import { LoginView } from "@/app/components/chat/LoginView"
 import { UsernameSetupView } from "@/app/components/chat/UsernameSetupView"
 import { ChatLayout } from "@/app/components/chat/ChatLayout"
@@ -99,6 +99,10 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
   const knownAcceptedFriendsRef = useRef<Set<string>>(new Set())
   const friendsInitializedRef = useRef(false)
+  const knownIncomingMessageIdsByPeerRef = useRef<Record<string, Set<string>>>({})
+  const messageTrackingReadyRef = useRef(false)
+  const notificationPermissionAskedRef = useRef(false)
+  const audioContextRef = useRef<AudioContext | null>(null)
 
   const applyFriendSnapshot = useCallback((snapshot: FriendSnapshot) => {
     const accepted = Array.from(new Set(snapshot.accepted_friends.map((item) => normalizeIdentity(item))))
@@ -281,6 +285,133 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messagesByPeer, targetUser])
+
+  const playNewMessageSound = useCallback(() => {
+    if (typeof window === "undefined") {
+      return
+    }
+
+    const audioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!audioContextCtor) {
+      return
+    }
+
+    const context = audioContextRef.current ?? new audioContextCtor()
+    audioContextRef.current = context
+
+    if (context.state === "suspended") {
+      void context.resume().catch(() => { })
+    }
+
+    const oscillator = context.createOscillator()
+    const gainNode = context.createGain()
+
+    oscillator.type = "sine"
+    oscillator.frequency.value = 880
+    gainNode.gain.setValueAtTime(0.0001, context.currentTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.08, context.currentTime + 0.01)
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.14)
+
+    oscillator.connect(gainNode)
+    gainNode.connect(context.destination)
+
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.14)
+  }, [])
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !authSession) {
+      return
+    }
+
+    const unlockNotificationsAndAudio = () => {
+      const audioContextCtor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (audioContextCtor) {
+        if (!audioContextRef.current) {
+          audioContextRef.current = new audioContextCtor()
+        }
+
+        if (audioContextRef.current.state === "suspended") {
+          void audioContextRef.current.resume().catch(() => { })
+        }
+      }
+
+      if (!("Notification" in window) || notificationPermissionAskedRef.current) {
+        return
+      }
+
+      notificationPermissionAskedRef.current = true
+      if (Notification.permission === "default") {
+        void Notification.requestPermission().catch(() => { })
+      }
+    }
+
+    window.addEventListener("pointerdown", unlockNotificationsAndAudio, { once: true })
+    window.addEventListener("keydown", unlockNotificationsAndAudio, { once: true })
+
+    return () => {
+      window.removeEventListener("pointerdown", unlockNotificationsAndAudio)
+      window.removeEventListener("keydown", unlockNotificationsAndAudio)
+    }
+  }, [authSession])
+
+  useEffect(() => {
+    if (!userId) {
+      knownIncomingMessageIdsByPeerRef.current = {}
+      messageTrackingReadyRef.current = false
+      return
+    }
+
+    const nextKnown: Record<string, Set<string>> = {}
+    const newlyIncomingByPeer: Array<{ peerId: string, message: ChatMessage }> = []
+
+    Object.entries(messagesByPeer).forEach(([peerId, peerMessages]) => {
+      const previousKnown = knownIncomingMessageIdsByPeerRef.current[peerId] ?? new Set<string>()
+      const currentKnown = new Set<string>()
+
+      peerMessages.forEach((msg) => {
+        if (msg.from_user_id !== userId) {
+          currentKnown.add(msg.id)
+          if (messageTrackingReadyRef.current && !previousKnown.has(msg.id)) {
+            newlyIncomingByPeer.push({ peerId, message: msg })
+          }
+        }
+      })
+
+      nextKnown[peerId] = currentKnown
+    })
+
+    knownIncomingMessageIdsByPeerRef.current = nextKnown
+
+    if (!messageTrackingReadyRef.current) {
+      messageTrackingReadyRef.current = true
+      return
+    }
+
+    if (newlyIncomingByPeer.length === 0) {
+      return
+    }
+
+    playNewMessageSound()
+
+    if (typeof window === "undefined" || !("Notification" in window) || Notification.permission !== "granted") {
+      return
+    }
+
+    const latestIncoming = newlyIncomingByPeer[newlyIncomingByPeer.length - 1]
+    const messagePreview = latestIncoming.message.text?.trim()
+      ? latestIncoming.message.text
+      : "Photo"
+
+    const shouldShowSystemNotification = document.hidden || targetUser !== latestIncoming.peerId
+    if (shouldShowSystemNotification) {
+      new Notification(`New message from ${latestIncoming.peerId}`, {
+        body: messagePreview,
+        tag: `chat-${latestIncoming.peerId}`,
+        silent: false,
+      })
+    }
+  }, [messagesByPeer, playNewMessageSound, targetUser, userId])
 
   const startChat = (otherId: string) => {
     setTargetUser(otherId)
@@ -599,6 +730,13 @@ export default function ChatPage() {
     setAllUsers([])
     setAllUsersLoading(false)
     setAllUsersError(null)
+    knownIncomingMessageIdsByPeerRef.current = {}
+    messageTrackingReadyRef.current = false
+    notificationPermissionAskedRef.current = false
+    if (audioContextRef.current) {
+      void audioContextRef.current.close().catch(() => { })
+      audioContextRef.current = null
+    }
   }
 
   if (!authSession) {
