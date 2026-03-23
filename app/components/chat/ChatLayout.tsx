@@ -120,9 +120,11 @@ export function ChatLayout({
 }: ChatLayoutProps) {
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
   const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
+  const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1)
   const normalizedDisplayName = displayName.trim().toLowerCase()
@@ -193,6 +195,14 @@ export function ChatLayout({
   }, [activeSearchResultIndex, searchResults, totalSearchResults])
 
   useEffect(() => {
+    if (!isSearchOpen) {
+      return
+    }
+
+    searchInputRef.current?.focus()
+  }, [isSearchOpen])
+
+  useEffect(() => {
     let cancelled = false
 
     queueMicrotask(() => {
@@ -202,6 +212,7 @@ export function ChatLayout({
 
       setSearchQuery("")
       setActiveSearchResultIndex(-1)
+      setIsSearchOpen(false)
     })
 
     return () => {
@@ -273,6 +284,16 @@ export function ChatLayout({
 
       return prev + 1
     })
+  }
+
+  const onOpenSearch = () => {
+    setIsSearchOpen(true)
+  }
+
+  const onCloseSearch = () => {
+    setIsSearchOpen(false)
+    setSearchQuery("")
+    setActiveSearchResultIndex(-1)
   }
 
   return (
@@ -443,39 +464,71 @@ export function ChatLayout({
               <div className="flex w-full items-center justify-between gap-4">
                 <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-2 rounded-full border border-gray-600 bg-gray-700/60 px-3 py-1.5">
-                    <input
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search messages"
-                      className="w-44 bg-transparent text-xs text-white placeholder-gray-400 outline-none"
-                    />
-                    <span className="min-w-12 text-center text-[11px] text-gray-300">
-                      {totalSearchResults > 0 && activeSearchResultIndex >= 0
-                        ? `${activeSearchResultIndex + 1}/${totalSearchResults}`
-                        : `0/${totalSearchResults}`}
-                    </span>
+                  {isSearchOpen ? (
+                    <div className="flex items-center gap-2 rounded-full border border-gray-600 bg-gray-700/60 px-3 py-1.5">
+                      <input
+                        ref={searchInputRef}
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        placeholder="Search messages"
+                        className="w-44 bg-transparent text-xs text-white placeholder-gray-400 outline-none"
+                      />
+                      <span className="min-w-12 text-center text-[11px] text-gray-300">
+                        {totalSearchResults > 0 && activeSearchResultIndex >= 0
+                          ? `${activeSearchResultIndex + 1}/${totalSearchResults}`
+                          : `0/${totalSearchResults}`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={onSearchPrevious}
+                        disabled={totalSearchResults === 0}
+                        className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Previous search result"
+                        title="Previous"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onSearchNext}
+                        disabled={totalSearchResults === 0}
+                        className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                        aria-label="Next search result"
+                        title="Next"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={onCloseSearch}
+                        className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600"
+                        aria-label="Close search"
+                        title="Close search"
+                      >
+                        x
+                      </button>
+                    </div>
+                  ) : (
                     <button
                       type="button"
-                      onClick={onSearchPrevious}
-                      disabled={totalSearchResults === 0}
-                      className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label="Previous search result"
-                      title="Previous"
+                      onClick={onOpenSearch}
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-600 bg-gray-700/60 text-sm text-gray-100 transition hover:bg-gray-600"
+                      aria-label="Open message search"
+                      title="Search messages"
                     >
-                      ↑
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className="h-4 w-4"
+                        aria-hidden="true"
+                      >
+                        <circle cx="11" cy="11" r="7" />
+                        <path d="M20 20L16.65 16.65" />
+                      </svg>
                     </button>
-                    <button
-                      type="button"
-                      onClick={onSearchNext}
-                      disabled={totalSearchResults === 0}
-                      className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
-                      aria-label="Next search result"
-                      title="Next"
-                    >
-                      ↓
-                    </button>
-                  </div>
+                  )}
                   <button
                     type="button"
                     onClick={onClearChat}
