@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, FormEvent, RefObject } from "react"
 import Image from "next/image"
 import type { ChatMessage } from "@/lib/chat/types"
@@ -120,8 +120,11 @@ export function ChatLayout({
 }: ChatLayoutProps) {
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
+  const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
   const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1)
   const normalizedDisplayName = displayName.trim().toLowerCase()
   const normalizedUserId = userId.trim().toLowerCase()
   const onlineUsersSet = new Set(onlineUsers.map((u) => u.trim().toLowerCase()))
@@ -129,6 +132,82 @@ export function ChatLayout({
     const normalized = u.trim().toLowerCase()
     return normalized !== normalizedDisplayName && normalized !== normalizedUserId
   })
+
+  const normalizedSearchQuery = searchQuery.trim().toLowerCase()
+  const searchResults = useMemo(() => {
+    if (!normalizedSearchQuery) {
+      return [] as Array<{ id: string }>
+    }
+
+    return currentMessages
+      .filter((msg) => msg.text?.trim() && msg.text.toLowerCase().includes(normalizedSearchQuery))
+      .map((msg) => ({ id: msg.id }))
+  }, [currentMessages, normalizedSearchQuery])
+
+  const searchResultIndexByMessageId = useMemo(() => {
+    const next: Record<string, number> = {}
+    searchResults.forEach((result, index) => {
+      next[result.id] = index
+    })
+    return next
+  }, [searchResults])
+
+  const hasSearchQuery = normalizedSearchQuery.length > 0
+  const totalSearchResults = searchResults.length
+
+  useEffect(() => {
+    let cancelled = false
+
+    queueMicrotask(() => {
+      if (cancelled) {
+        return
+      }
+
+      if (!hasSearchQuery) {
+        setActiveSearchResultIndex(-1)
+        return
+      }
+
+      if (totalSearchResults === 0) {
+        setActiveSearchResultIndex(-1)
+        return
+      }
+
+      // Default to latest hit (WhatsApp-like behavior).
+      setActiveSearchResultIndex(totalSearchResults - 1)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [hasSearchQuery, totalSearchResults])
+
+  useEffect(() => {
+    if (activeSearchResultIndex < 0 || activeSearchResultIndex >= totalSearchResults) {
+      return
+    }
+
+    const activeResult = searchResults[activeSearchResultIndex]
+    const targetElement = messageElementRefs.current[activeResult.id]
+    targetElement?.scrollIntoView({ behavior: "smooth", block: "center" })
+  }, [activeSearchResultIndex, searchResults, totalSearchResults])
+
+  useEffect(() => {
+    let cancelled = false
+
+    queueMicrotask(() => {
+      if (cancelled) {
+        return
+      }
+
+      setSearchQuery("")
+      setActiveSearchResultIndex(-1)
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [targetUser])
 
   const onImagePickerClick = () => {
     imageInputRef.current?.click()
@@ -166,6 +245,34 @@ export function ChatLayout({
 
     onRemoveFriend(friendToRemove)
     setFriendToRemove(null)
+  }
+
+  const onSearchPrevious = () => {
+    if (totalSearchResults === 0) {
+      return
+    }
+
+    setActiveSearchResultIndex((prev) => {
+      if (prev <= 0) {
+        return totalSearchResults - 1
+      }
+
+      return prev - 1
+    })
+  }
+
+  const onSearchNext = () => {
+    if (totalSearchResults === 0) {
+      return
+    }
+
+    setActiveSearchResultIndex((prev) => {
+      if (prev < 0 || prev >= totalSearchResults - 1) {
+        return 0
+      }
+
+      return prev + 1
+    })
   }
 
   return (
@@ -335,13 +442,48 @@ export function ChatLayout({
             <div className="p-4 border-b border-gray-700 bg-gray-800 flex items-center shadow-sm">
               <div className="flex w-full items-center justify-between gap-4">
                 <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
-                <button
-                  type="button"
-                  onClick={onClearChat}
-                  className="rounded-md border border-gray-600 px-3 py-1 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
-                >
-                  Clear Chat
-                </button>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 rounded-full border border-gray-600 bg-gray-700/60 px-3 py-1.5">
+                    <input
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search messages"
+                      className="w-44 bg-transparent text-xs text-white placeholder-gray-400 outline-none"
+                    />
+                    <span className="min-w-12 text-center text-[11px] text-gray-300">
+                      {totalSearchResults > 0 && activeSearchResultIndex >= 0
+                        ? `${activeSearchResultIndex + 1}/${totalSearchResults}`
+                        : `0/${totalSearchResults}`}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onSearchPrevious}
+                      disabled={totalSearchResults === 0}
+                      className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Previous search result"
+                      title="Previous"
+                    >
+                      ↑
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onSearchNext}
+                      disabled={totalSearchResults === 0}
+                      className="rounded-md px-1.5 py-0.5 text-xs font-semibold text-gray-200 transition hover:bg-gray-600 disabled:cursor-not-allowed disabled:opacity-40"
+                      aria-label="Next search result"
+                      title="Next"
+                    >
+                      ↓
+                    </button>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onClearChat}
+                    className="rounded-md border border-gray-600 px-3 py-1 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                  >
+                    Clear Chat
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -356,7 +498,24 @@ export function ChatLayout({
                   }`}>
                     <div className="space-y-1.5">
                       {group.messages.map((messagePart) => (
-                        <div key={messagePart.id} className="space-y-2">
+                        <div
+                          key={messagePart.id}
+                          ref={(node) => {
+                            messageElementRefs.current[messagePart.id] = node
+                          }}
+                          className={`space-y-2 rounded-md transition-colors ${(() => {
+                            const matchedResultIndex = searchResultIndexByMessageId[messagePart.id]
+                            if (matchedResultIndex === undefined) {
+                              return ""
+                            }
+
+                            if (matchedResultIndex === activeSearchResultIndex) {
+                              return "bg-yellow-300/45 ring-2 ring-yellow-200 px-1 py-0.5"
+                            }
+
+                            return "bg-yellow-300/25 ring-1 ring-yellow-300/40 px-1 py-0.5"
+                          })()}`}
+                        >
                           {messagePart.text ? (
                             <p className="text-sm leading-5 whitespace-pre-wrap wrap-break-word">{messagePart.text}</p>
                           ) : null}
