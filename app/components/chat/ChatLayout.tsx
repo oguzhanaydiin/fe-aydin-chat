@@ -464,8 +464,14 @@ export function ChatLayout({
               <div className="flex w-full items-center justify-between gap-4">
                 <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
                 <div className="flex items-center gap-2">
-                  {isSearchOpen ? (
-                    <div className="flex h-7 items-center gap-2 rounded-md border border-gray-600 bg-gray-700/60 px-2">
+                  <div className="relative h-7 w-[360px]">
+                    <div
+                      className={`absolute right-0 top-0 flex h-7 items-center gap-2 rounded-md border border-gray-600 bg-gray-700/60 px-2 transition-all duration-300 ease-in-out ${
+                        isSearchOpen
+                          ? "translate-x-0 opacity-100"
+                          : "translate-x-3 opacity-0 pointer-events-none"
+                      }`}
+                    >
                       <input
                         ref={searchInputRef}
                         value={searchQuery}
@@ -508,11 +514,14 @@ export function ChatLayout({
                         x
                       </button>
                     </div>
-                  ) : (
                     <button
                       type="button"
                       onClick={onOpenSearch}
-                      className="flex h-7 items-center justify-center rounded-md border border-gray-600 px-2 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                      className={`absolute right-0 top-0 flex h-7 items-center justify-center rounded-md border border-gray-600 px-2 text-xs text-gray-300 transition-all duration-300 ease-in-out hover:bg-gray-700 hover:text-white ${
+                        isSearchOpen
+                          ? "translate-x-2 opacity-0 pointer-events-none"
+                          : "translate-x-0 opacity-100"
+                      }`}
                       aria-label="Open message search"
                       title="Search messages"
                     >
@@ -528,7 +537,7 @@ export function ChatLayout({
                         <path d="M20 20L16.65 16.65" />
                       </svg>
                     </button>
-                  )}
+                  </div>
                   <button
                     type="button"
                     onClick={onClearChat}
