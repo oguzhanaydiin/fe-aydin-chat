@@ -465,13 +465,13 @@ export function ChatLayout({
                 <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
                 <div className="flex items-center gap-2">
                   {isSearchOpen ? (
-                    <div className="flex items-center gap-2 rounded-full border border-gray-600 bg-gray-700/60 px-3 py-1.5">
+                    <div className="flex h-7 items-center gap-2 rounded-md border border-gray-600 bg-gray-700/60 px-2">
                       <input
                         ref={searchInputRef}
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search messages"
-                        className="w-44 bg-transparent text-xs text-white placeholder-gray-400 outline-none"
+                        className="h-full w-44 bg-transparent text-xs text-white placeholder-gray-400 outline-none"
                       />
                       <span className="min-w-12 text-center text-[11px] text-gray-300">
                         {totalSearchResults > 0 && activeSearchResultIndex >= 0
@@ -512,7 +512,7 @@ export function ChatLayout({
                     <button
                       type="button"
                       onClick={onOpenSearch}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-gray-600 bg-gray-700/60 text-sm text-gray-100 transition hover:bg-gray-600"
+                      className="flex h-7 items-center justify-center rounded-md border border-gray-600 px-2 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
                       aria-label="Open message search"
                       title="Search messages"
                     >
@@ -521,7 +521,7 @@ export function ChatLayout({
                         fill="none"
                         stroke="currentColor"
                         strokeWidth="2"
-                        className="h-4 w-4"
+                        className="h-3.5 w-3.5"
                         aria-hidden="true"
                       >
                         <circle cx="11" cy="11" r="7" />
@@ -532,7 +532,7 @@ export function ChatLayout({
                   <button
                     type="button"
                     onClick={onClearChat}
-                    className="rounded-md border border-gray-600 px-3 py-1 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
+                    className="flex h-7 items-center rounded-md border border-gray-600 px-3 text-xs text-gray-300 transition hover:bg-gray-700 hover:text-white"
                   >
                     Clear Chat
                   </button>
