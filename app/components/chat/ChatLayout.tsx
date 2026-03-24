@@ -5,6 +5,7 @@ import type { ChatMessage } from "@/lib/chat/types"
 import { AddFriendModal } from "@/app/components/chat/AddFriendModal"
 import { ConfirmModal } from "@/app/components/chat/ConfirmModal"
 import { FriendListModal } from "@/app/components/chat/FriendListModal"
+import { OwnProfileModal, PeerProfileModal } from "@/app/components/chat/ProfileModal"
 
 type MessageGroup = {
   fromUserId: string
@@ -25,6 +26,11 @@ type ChatLayoutProps = {
   targetUser: string | null
   displayName: string
   userId: string
+  token: string
+  ownAvatarDataUrl?: string | null
+  ownEmail?: string
+  profileLoading?: boolean
+  profileError?: string | null
   message: string
   currentMessages: ChatMessage[]
   isAddUserModalOpen: boolean
@@ -46,6 +52,7 @@ type ChatLayoutProps = {
   onMessageChange: (value: string) => void
   onSendMessage: (e: FormEvent) => void
   onSendImage: (file: File) => void | Promise<void>
+  onSaveProfile: (avatarDataUrl: string | null) => void
 }
 
 function renderOutgoingStatusTick(status?: "sending" | "sent" | "delivered") {
@@ -96,6 +103,11 @@ export function ChatLayout({
   targetUser,
   displayName,
   userId,
+  token,
+  ownAvatarDataUrl,
+  ownEmail,
+  profileLoading,
+  profileError,
   message,
   currentMessages,
   isAddUserModalOpen,
@@ -117,6 +129,7 @@ export function ChatLayout({
   onMessageChange,
   onSendMessage,
   onSendImage,
+  onSaveProfile,
 }: ChatLayoutProps) {
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
@@ -124,6 +137,8 @@ export function ChatLayout({
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
   const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
+  const [isOwnProfileOpen, setIsOwnProfileOpen] = useState(false)
+  const [peerProfileUsername, setPeerProfileUsername] = useState<string | null>(null)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1)
@@ -401,19 +416,57 @@ export function ChatLayout({
             <p className="mt-3 rounded-md border border-red-900 bg-red-950 px-2 py-1.5 text-xs text-red-300">{friendActionError}</p>
           )}
         </div>
-        <div className="mt-4 pt-4 border-t border-gray-700 opacity-50 text-xs text-center">
-          You: <span className="font-mono text-blue-300">{displayName}</span>
-          <div className="mt-3">
+        <div className="mt-4 pt-4 border-t border-gray-700 text-xs">
+          <button
+            type="button"
+            onClick={() => setIsOwnProfileOpen(true)}
+            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-700 transition"
+          >
+            {ownAvatarDataUrl ? (
+              <Image
+                src={ownAvatarDataUrl}
+                alt="Your avatar"
+                width={28}
+                height={28}
+                unoptimized
+                className="h-7 w-7 rounded-full object-cover border border-gray-600 shrink-0"
+              />
+            ) : (
+              <div className="h-7 w-7 rounded-full bg-gray-600 flex items-center justify-center text-xs font-bold text-blue-300 border border-gray-500 shrink-0">
+                {displayName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <span className="truncate text-gray-300 font-mono">{displayName}</span>
+          </button>
+          <div className="mt-2 flex justify-center">
             <button
               type="button"
               onClick={onLogout}
-              className="rounded-md border border-gray-600 px-3 py-1 text-[11px] hover:bg-gray-700"
+              className="rounded-md border border-gray-600 px-3 py-1 text-[11px] text-gray-400 hover:bg-gray-700"
             >
               Logout
             </button>
           </div>
         </div>
       </div>
+
+      <OwnProfileModal
+        isOpen={isOwnProfileOpen}
+        username={displayName}
+        email={ownEmail ?? ""}
+        avatarDataUrl={ownAvatarDataUrl}
+        loading={profileLoading}
+        error={profileError}
+        onClose={() => setIsOwnProfileOpen(false)}
+        onSave={onSaveProfile}
+      />
+
+      <PeerProfileModal
+        isOpen={Boolean(peerProfileUsername)}
+        username={peerProfileUsername ?? ""}
+        token={token}
+        onClose={() => setPeerProfileUsername(null)}
+      />
 
       <AddFriendModal
         isOpen={isAddUserModalOpen}
@@ -462,7 +515,13 @@ export function ChatLayout({
           <>
             <div className="p-4 border-b border-gray-700 bg-gray-800 flex items-center shadow-sm">
               <div className="flex w-full items-center justify-between gap-4">
-                <h3 className="font-bold text-lg">Chat: <span className="text-blue-400">{targetUser}</span></h3>
+                <button
+                  type="button"
+                  onClick={() => setPeerProfileUsername(targetUser)}
+                  className="font-bold text-lg hover:underline text-left"
+                >
+                  Chat: <span className="text-blue-400">{targetUser}</span>
+                </button>
                 <div className="flex items-center gap-2">
                   <div className="relative h-7 w-[360px]">
                     <div

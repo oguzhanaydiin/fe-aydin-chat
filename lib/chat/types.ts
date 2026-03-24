@@ -9,6 +9,21 @@ export interface ChatMessage {
   delivery_status?: "sending" | "sent" | "delivered"
 }
 
+export interface UserProfile {
+  username: string
+  email: string
+  avatar_data_url?: string | null
+}
+
+export interface PublicProfile {
+  username: string
+  avatar_data_url?: string | null
+}
+
+export interface UpdateProfilePayload {
+  avatar_data_url?: string
+}
+
 export interface SendOtpResponse {
   message: string
   otp: string

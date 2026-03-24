@@ -29,6 +29,8 @@ export default function ChatPage() {
     usernameInput,
     usernameLoading,
     usernameError,
+    profileLoading,
+    profileError,
     setEmailInput,
     setOtpInput,
     setUsernameInput,
@@ -36,6 +38,7 @@ export default function ChatPage() {
     onVerifyOtp,
     onSaveUsername,
     onLogoutAuth,
+    onUpdateProfile,
   } = useAuthFlow()
 
   const [targetUser, setTargetUser] = useState<string | null>(null)
@@ -173,6 +176,11 @@ export default function ChatPage() {
       targetUser={targetUser}
       displayName={displayName}
       userId={userId}
+      token={token}
+      ownAvatarDataUrl={authSession?.avatar_data_url}
+      ownEmail={authSession?.email}
+      profileLoading={profileLoading}
+      profileError={profileError}
       message={message}
       currentMessages={currentMessages}
       isAddUserModalOpen={isAddUserModalOpen}
@@ -194,6 +202,7 @@ export default function ChatPage() {
       onMessageChange={setMessage}
       onSendMessage={sendMessage}
       onSendImage={onSendImage}
+      onSaveProfile={onUpdateProfile}
     />
   )
 }

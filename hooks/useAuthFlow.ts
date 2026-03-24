@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { requestOtp, saveUsername, verifyOtp } from "@/lib/chat/authApi"
+import { requestOtp, saveUsername, updateProfile, verifyOtp } from "@/lib/chat/authApi"
 import { SESSION_STORAGE_KEY } from "@/lib/chat/constants"
 
 export type AuthSession = {
@@ -8,6 +8,7 @@ export type AuthSession = {
   email: string
   username: string | null
   needsUsernameSetup: boolean
+  avatar_data_url?: string | null
 }
 
 export function useAuthFlow() {
@@ -21,6 +22,8 @@ export function useAuthFlow() {
   const [usernameInput, setUsernameInput] = useState("")
   const [usernameLoading, setUsernameLoading] = useState(false)
   const [usernameError, setUsernameError] = useState<string | null>(null)
+  const [profileLoading, setProfileLoading] = useState(false)
+  const [profileError, setProfileError] = useState<string | null>(null)
 
   useEffect(() => {
     const raw = localStorage.getItem(SESSION_STORAGE_KEY)
@@ -165,6 +168,36 @@ export function useAuthFlow() {
     setUsernameInput("")
     setUsernameError(null)
     setAuthError(null)
+    setProfileError(null)
+  }
+
+  const onUpdateProfile = async (avatarDataUrl: string | null) => {
+    if (!authSession) {
+      return
+    }
+
+    setProfileLoading(true)
+    setProfileError(null)
+
+    try {
+      const payload: { avatar_data_url?: string } = {}
+      if (avatarDataUrl !== null) {
+        payload.avatar_data_url = avatarDataUrl
+      }
+
+      const result = await updateProfile(authSession.token, payload)
+      const nextSession: AuthSession = {
+        ...authSession,
+        avatar_data_url: result.avatar_data_url ?? null,
+      }
+
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(nextSession))
+      setAuthSession(nextSession)
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Failed to update profile")
+    } finally {
+      setProfileLoading(false)
+    }
   }
 
   return {
@@ -181,6 +214,8 @@ export function useAuthFlow() {
     usernameInput,
     usernameLoading,
     usernameError,
+    profileLoading,
+    profileError,
     setEmailInput,
     setOtpInput,
     setUsernameInput,
@@ -188,5 +223,6 @@ export function useAuthFlow() {
     onVerifyOtp,
     onSaveUsername,
     onLogoutAuth,
+    onUpdateProfile,
   }
 }

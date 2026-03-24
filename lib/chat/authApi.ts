@@ -1,9 +1,12 @@
 import type {
   AuthSessionResponse,
   FriendSnapshot,
+  PublicProfile,
   SaveUsernameResponse,
   SendOtpResponse,
+  UpdateProfilePayload,
   UserDirectoryEntry,
+  UserProfile,
 } from "@/lib/chat/types"
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080"
@@ -184,4 +187,51 @@ export async function removeFriend(token: string, username: string): Promise<voi
     const message = await response.text()
     throw new Error(message || "Failed to remove friend")
   }
+}
+
+export async function getMyProfile(token: string): Promise<UserProfile> {
+  const response = await fetch(`${API_URL}/users/me`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to fetch profile")
+  }
+
+  return (await response.json()) as UserProfile
+}
+
+export async function updateProfile(
+  token: string,
+  payload: UpdateProfilePayload,
+): Promise<UserProfile> {
+  const response = await fetch(`${API_URL}/users/profile`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to update profile")
+  }
+
+  return (await response.json()) as UserProfile
+}
+
+export async function getUserProfile(token: string, username: string): Promise<PublicProfile> {
+  const response = await fetch(`${API_URL}/users/${encodeURIComponent(username)}/profile`, {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to fetch user profile")
+  }
+
+  return (await response.json()) as PublicProfile
 }
