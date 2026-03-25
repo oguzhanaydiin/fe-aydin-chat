@@ -15,7 +15,7 @@ type MessageGroup = {
     id: string
     text: string
     imageDataUrl?: string
-    heartedBy?: string[]
+    reactions?: Record<string, string[]>
   }>
 }
 
@@ -80,7 +80,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       : null
 
     if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
-      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, heartedBy: msg.hearted_by })
+      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, reactions: msg.reactions })
       lastGroup.createdAt = msg.created_at
       lastGroup.deliveryStatus = msg.delivery_status
       return groups
@@ -90,7 +90,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       fromUserId: msg.from_user_id,
       createdAt: msg.created_at,
       deliveryStatus: msg.delivery_status,
-      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, heartedBy: msg.hearted_by }],
+      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, reactions: msg.reactions }],
     })
 
     return groups
@@ -655,17 +655,24 @@ export function ChatLayout({
                               className="max-h-72 w-auto max-w-full rounded-lg border border-black/20 object-contain"
                             />
                           ) : null}
-                          {(messagePart.heartedBy?.length ?? 0) > 0 ? (
+                          {(() => {
+                            const heartUsers = messagePart.reactions?.["❤️"] ?? []
+                            if (heartUsers.length === 0) {
+                              return null
+                            }
+
+                            return (
                             <div
                               className="text-right text-base leading-none"
-                              title={`Hearted by: ${messagePart.heartedBy?.join(", ")}`}
+                              title={`Hearted by: ${heartUsers.join(", ")}`}
                             >
                               <span aria-label="hearted message" role="img">❤️</span>
                               <span className="ml-1 text-[11px] font-semibold text-gray-200 align-middle">
-                                {messagePart.heartedBy?.length}
+                                {heartUsers.length}
                               </span>
                             </div>
-                          ) : null}
+                            )
+                          })()}
                         </div>
                       ))}
                     </div>
