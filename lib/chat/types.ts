@@ -75,7 +75,7 @@ export type WsServerEvent =
   | { type: "online_users", users: string[] }
   | { type: "inbox", messages: ChatMessage[] }
   | { type: "new_message", message: ChatMessage }
-  | { type: "message_hearted", message_id: string, by_username: string }
+  | { type: "message_hearted", message_id: string, by_username: string, hearted_by: string[] }
   | { type: "message_queued", message_id: string, client_message_id?: string }
   | { type: "ack_result", removed_count: number, message_ids?: string[] }
   | { type: "message_delivered", message_id: string, client_message_id?: string }

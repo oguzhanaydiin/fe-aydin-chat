@@ -656,8 +656,14 @@ export function ChatLayout({
                             />
                           ) : null}
                           {(messagePart.heartedBy?.length ?? 0) > 0 ? (
-                            <div className="pointer-events-none text-right text-base leading-none">
+                            <div
+                              className="text-right text-base leading-none"
+                              title={`Hearted by: ${messagePart.heartedBy?.join(", ")}`}
+                            >
                               <span aria-label="hearted message" role="img">❤️</span>
+                              <span className="ml-1 text-[11px] font-semibold text-gray-200 align-middle">
+                                {messagePart.heartedBy?.length}
+                              </span>
                             </div>
                           ) : null}
                         </div>

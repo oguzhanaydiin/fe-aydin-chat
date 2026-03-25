@@ -68,7 +68,51 @@ export function useChatSocket({
     }
   }, [])
 
-  const applyHeartReaction = useCallback((messageId: string, byUsername: string) => {
+  const setHeartReactions = useCallback((messageId: string, heartedBy: string[]) => {
+    if (!messageId) return
+
+    const normalizedHeartedBy = heartedBy
+      .map((username) => username.trim().toLowerCase())
+      .filter((username) => username.length > 0)
+
+    setMessagesByPeer((prev) => {
+      let changed = false
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        let peerChanged = false
+
+        const updatedMessages = messages.map((msg) => {
+          if (msg.id !== messageId) {
+            return msg
+          }
+
+          const currentHeartedBy = msg.hearted_by ?? []
+          const unchanged = currentHeartedBy.length === normalizedHeartedBy.length
+            && currentHeartedBy.every((username, index) => username === normalizedHeartedBy[index])
+          if (unchanged) {
+            return msg
+          }
+
+          changed = true
+          peerChanged = true
+
+          return {
+            ...msg,
+            hearted_by: normalizedHeartedBy,
+          }
+        })
+
+        if (peerChanged) {
+          next[peerId] = updatedMessages
+        }
+      })
+
+      return changed ? next : prev
+    })
+  }, [])
+
+  const toggleLocalHeartReaction = useCallback((messageId: string, byUsername: string) => {
     if (!messageId || !byUsername) return
 
     const normalizedBy = byUsername.trim().toLowerCase()
@@ -87,16 +131,17 @@ export function useChatSocket({
           }
 
           const currentHeartedBy = msg.hearted_by ?? []
-          if (currentHeartedBy.includes(normalizedBy)) {
-            return msg
-          }
+          const hasHeart = currentHeartedBy.includes(normalizedBy)
+          const nextHeartedBy = hasHeart
+            ? currentHeartedBy.filter((username) => username !== normalizedBy)
+            : [...currentHeartedBy, normalizedBy]
 
           changed = true
           peerChanged = true
 
           return {
             ...msg,
-            hearted_by: [...currentHeartedBy, normalizedBy],
+            hearted_by: nextHeartedBy,
           }
         })
 
@@ -379,7 +424,7 @@ export function useChatSocket({
         }
 
         if (data.type === "message_hearted") {
-          applyHeartReaction(data.message_id, data.by_username)
+          setHeartReactions(data.message_id, data.hearted_by)
           return
         }
 
@@ -455,7 +500,7 @@ export function useChatSocket({
       }
     }
   }, [
-    applyHeartReaction,
+    setHeartReactions,
     appendMessage,
     markOutgoingMessageAsDelivered,
     normalizeIncomingMessage,
@@ -695,13 +740,13 @@ export function useChatSocket({
       return
     }
 
-    applyHeartReaction(normalizedMessageId, normalizedUserId)
+    toggleLocalHeartReaction(normalizedMessageId, normalizedUserId)
     sendEvent({
       type: "heart_message",
       message_id: normalizedMessageId,
       to_username: normalizedTo,
     })
-  }, [applyHeartReaction, sendEvent, userId])
+  }, [sendEvent, toggleLocalHeartReaction, userId])
 
   return {
     onlineUsers,
