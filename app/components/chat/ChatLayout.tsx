@@ -655,24 +655,6 @@ export function ChatLayout({
                               className="max-h-72 w-auto max-w-full rounded-lg border border-black/20 object-contain"
                             />
                           ) : null}
-                          {(() => {
-                            const heartUsers = messagePart.reactions?.["❤️"] ?? []
-                            if (heartUsers.length === 0) {
-                              return null
-                            }
-
-                            return (
-                            <div
-                              className="text-right text-base leading-none"
-                              title={`Hearted by: ${heartUsers.join(", ")}`}
-                            >
-                              <span aria-label="hearted message" role="img">❤️</span>
-                              <span className="ml-1 text-[11px] font-semibold text-gray-200 align-middle">
-                                {heartUsers.length}
-                              </span>
-                            </div>
-                            )
-                          })()}
                         </div>
                       ))}
                     </div>
@@ -683,6 +665,28 @@ export function ChatLayout({
                       })}
                       {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
                     </p>
+                    <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+                      {group.messages.map((messagePart) => {
+                        const heartUsers = messagePart.reactions?.["❤️"] ?? []
+                        if (heartUsers.length === 0) {
+                          return null
+                        }
+
+                        return (
+                          <button
+                            key={`reaction-${messagePart.id}`}
+                            type="button"
+                            onClick={() => onHeartMessage(targetUser, messagePart.id)}
+                            className="inline-flex items-center gap-1 rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-gray-100 cursor-pointer hover:bg-black/30"
+                            title={`Hearted by: ${heartUsers.join(", ")}`}
+                            aria-label="Toggle heart reaction"
+                          >
+                            <span aria-label="hearted message" role="img">❤️</span>
+                            <span>{heartUsers.length}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
               ))}
