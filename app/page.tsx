@@ -45,7 +45,15 @@ export default function ChatPage() {
   const [message, setMessage] = useState("")
   const messagesEndRef = useRef<HTMLDivElement | null>(null)
 
-  const { onlineUsers, messagesByPeer, sendMessage: sendChatMessage, sendImageMessage, clearChat, status: wsStatus } = useChatSocket({
+  const {
+    onlineUsers,
+    messagesByPeer,
+    sendMessage: sendChatMessage,
+    sendImageMessage,
+    sendHeartMessage,
+    clearChat,
+    status: wsStatus,
+  } = useChatSocket({
     userId,
     token,
     wsUrl: WS_URL,
@@ -201,6 +209,7 @@ export default function ChatPage() {
       onLogout={onLogout}
       onMessageChange={setMessage}
       onSendMessage={sendMessage}
+      onHeartMessage={sendHeartMessage}
       onSendImage={onSendImage}
       onSaveProfile={onUpdateProfile}
     />

@@ -4,6 +4,7 @@ export interface ChatMessage {
   to_user_id: string
   text: string
   image_data_url?: string
+  hearted_by?: string[]
   created_at: string
   client_message_id?: string
   delivery_status?: "sending" | "sent" | "delivered"
@@ -58,6 +59,7 @@ export type WsClientEvent =
   | { type: "register", token: string }
   | { type: "get_online_users" }
   | { type: "ack", message_ids: string[] }
+  | { type: "heart_message", message_id: string, to_username: string, to_user_id?: string }
   | {
     type: "send_message"
     to_user_id: string
@@ -73,6 +75,7 @@ export type WsServerEvent =
   | { type: "online_users", users: string[] }
   | { type: "inbox", messages: ChatMessage[] }
   | { type: "new_message", message: ChatMessage }
+  | { type: "message_hearted", message_id: string, by_username: string }
   | { type: "message_queued", message_id: string, client_message_id?: string }
   | { type: "ack_result", removed_count: number, message_ids?: string[] }
   | { type: "message_delivered", message_id: string, client_message_id?: string }

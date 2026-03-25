@@ -43,6 +43,9 @@ export function useChatSocket({
     const createdAt = typeof incoming.created_at === "string" ? incoming.created_at : new Date().toISOString()
     const text = typeof incoming.text === "string" ? incoming.text : ""
     const imageDataUrl = typeof incoming.image_data_url === "string" ? incoming.image_data_url : undefined
+    const heartedBy = Array.isArray(incoming.hearted_by)
+      ? incoming.hearted_by.filter((entry): entry is string => typeof entry === "string")
+      : undefined
     const clientMessageId = typeof incoming.client_message_id === "string" ? incoming.client_message_id : undefined
     const deliveryStatus = incoming.delivery_status === "sending" || incoming.delivery_status === "sent" || incoming.delivery_status === "delivered"
       ? incoming.delivery_status
@@ -58,10 +61,52 @@ export function useChatSocket({
       to_user_id: toUserId,
       text,
       image_data_url: imageDataUrl,
+      hearted_by: heartedBy,
       created_at: createdAt,
       client_message_id: clientMessageId,
       delivery_status: deliveryStatus,
     }
+  }, [])
+
+  const applyHeartReaction = useCallback((messageId: string, byUsername: string) => {
+    if (!messageId || !byUsername) return
+
+    const normalizedBy = byUsername.trim().toLowerCase()
+    if (!normalizedBy) return
+
+    setMessagesByPeer((prev) => {
+      let changed = false
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        let peerChanged = false
+
+        const updatedMessages = messages.map((msg) => {
+          if (msg.id !== messageId) {
+            return msg
+          }
+
+          const currentHeartedBy = msg.hearted_by ?? []
+          if (currentHeartedBy.includes(normalizedBy)) {
+            return msg
+          }
+
+          changed = true
+          peerChanged = true
+
+          return {
+            ...msg,
+            hearted_by: [...currentHeartedBy, normalizedBy],
+          }
+        })
+
+        if (peerChanged) {
+          next[peerId] = updatedMessages
+        }
+      })
+
+      return changed ? next : prev
+    })
   }, [])
 
   const markOutgoingMessageAsDelivered = useCallback((messageId: string, clientMessageId?: string) => {
@@ -333,6 +378,11 @@ export function useChatSocket({
           return
         }
 
+        if (data.type === "message_hearted") {
+          applyHeartReaction(data.message_id, data.by_username)
+          return
+        }
+
         if (data.type === "message_queued") {
           if (!data.client_message_id) {
             return
@@ -405,6 +455,7 @@ export function useChatSocket({
       }
     }
   }, [
+    applyHeartReaction,
     appendMessage,
     markOutgoingMessageAsDelivered,
     normalizeIncomingMessage,
@@ -636,6 +687,22 @@ export function useChatSocket({
     })()
   }, [userId, openHistoryDb])
 
+  const sendHeartMessage = useCallback((toUserId: string, messageId: string) => {
+    const normalizedTo = toUserId.trim().toLowerCase()
+    const normalizedMessageId = messageId.trim()
+    const normalizedUserId = userId.trim().toLowerCase()
+    if (!normalizedTo || !normalizedMessageId || !normalizedUserId) {
+      return
+    }
+
+    applyHeartReaction(normalizedMessageId, normalizedUserId)
+    sendEvent({
+      type: "heart_message",
+      message_id: normalizedMessageId,
+      to_username: normalizedTo,
+    })
+  }, [applyHeartReaction, sendEvent, userId])
+
   return {
     onlineUsers,
     messagesByPeer,
@@ -644,6 +711,7 @@ export function useChatSocket({
     error,
     sendMessage,
     sendImageMessage,
+    sendHeartMessage,
     clearChat,
   }
 }

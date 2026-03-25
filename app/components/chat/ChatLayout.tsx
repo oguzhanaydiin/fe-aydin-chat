@@ -15,6 +15,7 @@ type MessageGroup = {
     id: string
     text: string
     imageDataUrl?: string
+    heartedBy?: string[]
   }>
 }
 
@@ -51,6 +52,7 @@ type ChatLayoutProps = {
   onLogout: () => void
   onMessageChange: (value: string) => void
   onSendMessage: (e: FormEvent) => void
+  onHeartMessage: (toUserId: string, messageId: string) => void
   onSendImage: (file: File) => void | Promise<void>
   onSaveProfile: (avatarDataUrl: string | null) => void
 }
@@ -78,7 +80,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       : null
 
     if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
-      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url })
+      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, heartedBy: msg.hearted_by })
       lastGroup.createdAt = msg.created_at
       lastGroup.deliveryStatus = msg.delivery_status
       return groups
@@ -88,7 +90,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       fromUserId: msg.from_user_id,
       createdAt: msg.created_at,
       deliveryStatus: msg.delivery_status,
-      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url }],
+      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, heartedBy: msg.hearted_by }],
     })
 
     return groups
@@ -128,6 +130,7 @@ export function ChatLayout({
   onLogout,
   onMessageChange,
   onSendMessage,
+  onHeartMessage,
   onSendImage,
   onSaveProfile,
 }: ChatLayoutProps) {
@@ -624,6 +627,8 @@ export function ChatLayout({
                           ref={(node) => {
                             messageElementRefs.current[messagePart.id] = node
                           }}
+                          onDoubleClick={() => onHeartMessage(targetUser, messagePart.id)}
+                          title="Double-click to heart"
                           className={`space-y-2 rounded-md transition-colors ${(() => {
                             const matchedResultIndex = searchResultIndexByMessageId[messagePart.id]
                             if (matchedResultIndex === undefined) {
@@ -649,6 +654,11 @@ export function ChatLayout({
                               unoptimized
                               className="max-h-72 w-auto max-w-full rounded-lg border border-black/20 object-contain"
                             />
+                          ) : null}
+                          {(messagePart.heartedBy?.length ?? 0) > 0 ? (
+                            <div className="pointer-events-none text-right text-base leading-none">
+                              <span aria-label="hearted message" role="img">❤️</span>
+                            </div>
                           ) : null}
                         </div>
                       ))}
