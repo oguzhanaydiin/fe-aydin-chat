@@ -43,6 +43,30 @@ export function useChatSocket({
     const createdAt = typeof incoming.created_at === "string" ? incoming.created_at : new Date().toISOString()
     const text = typeof incoming.text === "string" ? incoming.text : ""
     const imageDataUrl = typeof incoming.image_data_url === "string" ? incoming.image_data_url : undefined
+    const reactions = (() => {
+      const rawReactions = incoming.reactions
+      if (!rawReactions || typeof rawReactions !== "object" || Array.isArray(rawReactions)) {
+        return undefined
+      }
+
+      const normalized: Record<string, string[]> = {}
+      Object.entries(rawReactions as Record<string, unknown>).forEach(([reaction, users]) => {
+        if (!reaction.trim() || !Array.isArray(users)) {
+          return
+        }
+
+        const normalizedUsers = users
+          .filter((entry): entry is string => typeof entry === "string")
+          .map((entry) => entry.trim().toLowerCase())
+          .filter((entry) => entry.length > 0)
+
+        if (normalizedUsers.length > 0) {
+          normalized[reaction] = normalizedUsers
+        }
+      })
+
+      return Object.keys(normalized).length > 0 ? normalized : undefined
+    })()
     const clientMessageId = typeof incoming.client_message_id === "string" ? incoming.client_message_id : undefined
     const deliveryStatus = incoming.delivery_status === "sending" || incoming.delivery_status === "sent" || incoming.delivery_status === "delivered"
       ? incoming.delivery_status
@@ -58,10 +82,124 @@ export function useChatSocket({
       to_user_id: toUserId,
       text,
       image_data_url: imageDataUrl,
+      reactions,
       created_at: createdAt,
       client_message_id: clientMessageId,
       delivery_status: deliveryStatus,
     }
+  }, [])
+
+  const setMessageReactions = useCallback((messageId: string, reactions: Record<string, string[]>) => {
+    if (!messageId) return
+
+    const normalizedReactions: Record<string, string[]> = {}
+    Object.entries(reactions).forEach(([reaction, users]) => {
+      if (!reaction.trim()) {
+        return
+      }
+
+      const normalizedUsers = users
+        .map((username) => username.trim().toLowerCase())
+        .filter((username) => username.length > 0)
+
+      if (normalizedUsers.length > 0) {
+        normalizedReactions[reaction] = normalizedUsers
+      }
+    })
+
+    setMessagesByPeer((prev) => {
+      let changed = false
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        let peerChanged = false
+
+        const updatedMessages = messages.map((msg) => {
+          if (msg.id !== messageId) {
+            return msg
+          }
+
+          const currentReactions = msg.reactions ?? {}
+          const currentKeys = Object.keys(currentReactions)
+          const nextKeys = Object.keys(normalizedReactions)
+          const unchanged = currentKeys.length === nextKeys.length
+            && nextKeys.every((reaction) => {
+              const currentUsers = currentReactions[reaction] ?? []
+              const nextUsers = normalizedReactions[reaction] ?? []
+              return currentUsers.length === nextUsers.length
+                && currentUsers.every((username, index) => username === nextUsers[index])
+            })
+          if (unchanged) {
+            return msg
+          }
+
+          changed = true
+          peerChanged = true
+
+          return {
+            ...msg,
+            reactions: normalizedReactions,
+          }
+        })
+
+        if (peerChanged) {
+          next[peerId] = updatedMessages
+        }
+      })
+
+      return changed ? next : prev
+    })
+  }, [])
+
+  const toggleLocalMessageReaction = useCallback((messageId: string, reaction: string, byUsername: string) => {
+    if (!messageId || !reaction || !byUsername) return
+
+    const normalizedBy = byUsername.trim().toLowerCase()
+    const normalizedReaction = reaction.trim()
+    if (!normalizedBy || !normalizedReaction) return
+
+    setMessagesByPeer((prev) => {
+      let changed = false
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        let peerChanged = false
+
+        const updatedMessages = messages.map((msg) => {
+          if (msg.id !== messageId) {
+            return msg
+          }
+
+          const currentReactions = msg.reactions ?? {}
+          const currentUsers = currentReactions[normalizedReaction] ?? []
+          const hasReaction = currentUsers.includes(normalizedBy)
+          const nextUsers = hasReaction
+            ? currentUsers.filter((username) => username !== normalizedBy)
+            : [...currentUsers, normalizedBy]
+
+          const nextReactions = { ...currentReactions }
+          if (nextUsers.length === 0) {
+            delete nextReactions[normalizedReaction]
+          } else {
+            nextReactions[normalizedReaction] = nextUsers
+          }
+
+          changed = true
+          peerChanged = true
+
+          return {
+            ...msg,
+            reactions: nextReactions,
+          }
+        })
+
+        if (peerChanged) {
+          next[peerId] = updatedMessages
+        }
+      })
+
+      return changed ? next : prev
+    })
   }, [])
 
   const markOutgoingMessageAsDelivered = useCallback((messageId: string, clientMessageId?: string) => {
@@ -333,6 +471,11 @@ export function useChatSocket({
           return
         }
 
+        if (data.type === "message_reactions_updated") {
+          setMessageReactions(data.message_id, data.reactions)
+          return
+        }
+
         if (data.type === "message_queued") {
           if (!data.client_message_id) {
             return
@@ -405,6 +548,7 @@ export function useChatSocket({
       }
     }
   }, [
+    setMessageReactions,
     appendMessage,
     markOutgoingMessageAsDelivered,
     normalizeIncomingMessage,
@@ -636,6 +780,24 @@ export function useChatSocket({
     })()
   }, [userId, openHistoryDb])
 
+  const sendHeartMessage = useCallback((toUserId: string, messageId: string) => {
+    const normalizedTo = toUserId.trim().toLowerCase()
+    const normalizedMessageId = messageId.trim()
+    const normalizedUserId = userId.trim().toLowerCase()
+    if (!normalizedTo || !normalizedMessageId || !normalizedUserId) {
+      return
+    }
+
+    const heartReaction = "❤️"
+    toggleLocalMessageReaction(normalizedMessageId, heartReaction, normalizedUserId)
+    sendEvent({
+      type: "react_message",
+      message_id: normalizedMessageId,
+      to_username: normalizedTo,
+      reaction: heartReaction,
+    })
+  }, [sendEvent, toggleLocalMessageReaction, userId])
+
   return {
     onlineUsers,
     messagesByPeer,
@@ -644,6 +806,7 @@ export function useChatSocket({
     error,
     sendMessage,
     sendImageMessage,
+    sendHeartMessage,
     clearChat,
   }
 }

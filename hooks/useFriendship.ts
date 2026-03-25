@@ -107,20 +107,6 @@ export function useFriendship({
       .catch(() => { })
   }, [wsStatus, applyFriendSnapshot, token])
 
-  useEffect(() => {
-    if (!token || !userId) {
-      return
-    }
-
-    const intervalId = setInterval(() => {
-      void fetchFriendSnapshot(token)
-        .then((snapshot) => applyFriendSnapshot(snapshot))
-        .catch(() => { })
-    }, 10000)
-
-    return () => clearInterval(intervalId)
-  }, [applyFriendSnapshot, token, userId])
-
   const onOpenAddUserModal = async () => {
     if (!token) {
       return
@@ -169,13 +155,8 @@ export function useFriendship({
 
     try {
       await sendFriendRequest(token, candidate)
-      setOutgoingRequests((prev) => {
-        if (prev.some((item) => normalizeIdentity(item) === normalizedCandidate)) {
-          return prev
-        }
-
-        return [...prev, normalizedCandidate]
-      })
+      const snapshot = await fetchFriendSnapshot(token)
+      applyFriendSnapshot(snapshot)
       setIsAddUserModalOpen(false)
     } catch (err) {
       setFriendActionError(err instanceof Error ? err.message : "Could not send friend request")
@@ -200,15 +181,8 @@ export function useFriendship({
     try {
       await acceptFriendRequest(token, normalized)
 
-      setIncomingRequests((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
-      setOutgoingRequests((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
-      setFriends((prev) => {
-        if (prev.some((item) => normalizeIdentity(item) === normalized)) {
-          return prev
-        }
-
-        return [...prev, normalized]
-      })
+      const snapshot = await fetchFriendSnapshot(token)
+      applyFriendSnapshot(snapshot)
       setTargetUser(normalized)
     } catch (err) {
       setFriendActionError(err instanceof Error ? err.message : "Could not accept friend request")

@@ -15,6 +15,7 @@ type MessageGroup = {
     id: string
     text: string
     imageDataUrl?: string
+    reactions?: Record<string, string[]>
   }>
 }
 
@@ -51,6 +52,7 @@ type ChatLayoutProps = {
   onLogout: () => void
   onMessageChange: (value: string) => void
   onSendMessage: (e: FormEvent) => void
+  onHeartMessage: (toUserId: string, messageId: string) => void
   onSendImage: (file: File) => void | Promise<void>
   onSaveProfile: (avatarDataUrl: string | null) => void
 }
@@ -78,7 +80,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       : null
 
     if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
-      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url })
+      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, reactions: msg.reactions })
       lastGroup.createdAt = msg.created_at
       lastGroup.deliveryStatus = msg.delivery_status
       return groups
@@ -88,7 +90,7 @@ function groupMessages(currentMessages: ChatMessage[]) {
       fromUserId: msg.from_user_id,
       createdAt: msg.created_at,
       deliveryStatus: msg.delivery_status,
-      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url }],
+      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, reactions: msg.reactions }],
     })
 
     return groups
@@ -128,6 +130,7 @@ export function ChatLayout({
   onLogout,
   onMessageChange,
   onSendMessage,
+  onHeartMessage,
   onSendImage,
   onSaveProfile,
 }: ChatLayoutProps) {
@@ -624,6 +627,8 @@ export function ChatLayout({
                           ref={(node) => {
                             messageElementRefs.current[messagePart.id] = node
                           }}
+                          onDoubleClick={() => onHeartMessage(targetUser, messagePart.id)}
+                          title="Double-click to heart"
                           className={`space-y-2 rounded-md transition-colors ${(() => {
                             const matchedResultIndex = searchResultIndexByMessageId[messagePart.id]
                             if (matchedResultIndex === undefined) {
@@ -660,6 +665,28 @@ export function ChatLayout({
                       })}
                       {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
                     </p>
+                    <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+                      {group.messages.map((messagePart) => {
+                        const heartUsers = messagePart.reactions?.["❤️"] ?? []
+                        if (heartUsers.length === 0) {
+                          return null
+                        }
+
+                        return (
+                          <button
+                            key={`reaction-${messagePart.id}`}
+                            type="button"
+                            onClick={() => onHeartMessage(targetUser, messagePart.id)}
+                            className="inline-flex items-center gap-1 rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-gray-100 cursor-pointer hover:bg-black/30"
+                            title={`Hearted by: ${heartUsers.join(", ")}`}
+                            aria-label="Toggle heart reaction"
+                          >
+                            <span aria-label="hearted message" role="img">❤️</span>
+                            <span>{heartUsers.length}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 </div>
               ))}
