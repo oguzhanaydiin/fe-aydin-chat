@@ -68,9 +68,13 @@ export function useChatSocket({
       return Object.keys(normalized).length > 0 ? normalized : undefined
     })()
     const clientMessageId = typeof incoming.client_message_id === "string" ? incoming.client_message_id : undefined
-    const deliveryStatus = incoming.delivery_status === "sending" || incoming.delivery_status === "sent" || incoming.delivery_status === "delivered"
+    const deliveryStatus = incoming.delivery_status === "sending"
+      || incoming.delivery_status === "sent"
+      || incoming.delivery_status === "delivered"
+      || incoming.delivery_status === "failed"
       ? incoming.delivery_status
       : undefined
+    const errorMessage = typeof incoming.error_message === "string" ? incoming.error_message : undefined
 
     if (!id || !fromUserId || !toUserId) {
       return null
@@ -86,6 +90,7 @@ export function useChatSocket({
       created_at: createdAt,
       client_message_id: clientMessageId,
       delivery_status: deliveryStatus,
+      error_message: errorMessage,
     }
   }, [])
 
@@ -219,7 +224,7 @@ export function useChatSocket({
           if (msg.id === messageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
             peerChanged = true
             changed = true
-            return { ...msg, delivery_status: "delivered" as const }
+            return { ...msg, delivery_status: "delivered" as const, error_message: undefined }
           }
 
           return msg
@@ -243,6 +248,7 @@ export function useChatSocket({
                 id: messageId,
                 client_message_id: clientMessageId,
                 delivery_status: "delivered" as const,
+                error_message: undefined,
               }
             }
 
@@ -256,6 +262,98 @@ export function useChatSocket({
       }
 
       return changed ? next : prev
+    })
+  }, [userId])
+
+  const markOutgoingMessageAsFailed = useCallback((params: { messageId?: string, clientMessageId?: string, reason?: string }) => {
+    const { messageId, clientMessageId, reason } = params
+    if (!messageId && !clientMessageId) return
+
+    const normalizedReason = reason?.trim()
+
+    setMessagesByPeer((prev) => {
+      let changed = false
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        let peerChanged = false
+
+        const updatedMessages = messages.map((msg) => {
+          const isTargetMessage = (messageId && msg.id === messageId)
+            || (clientMessageId && (msg.id === clientMessageId || msg.client_message_id === clientMessageId))
+
+          if (!isTargetMessage || msg.from_user_id !== userId) {
+            return msg
+          }
+
+          if (msg.delivery_status === "failed" && msg.error_message === normalizedReason) {
+            return msg
+          }
+
+          changed = true
+          peerChanged = true
+
+          return {
+            ...msg,
+            delivery_status: "failed" as const,
+            error_message: normalizedReason,
+          }
+        })
+
+        if (peerChanged) {
+          next[peerId] = updatedMessages
+        }
+      })
+
+      return changed ? next : prev
+    })
+  }, [userId])
+
+  const markLatestOutgoingSendingAsFailed = useCallback((reason?: string) => {
+    const normalizedReason = reason?.trim()
+
+    setMessagesByPeer((prev) => {
+      let latestPeerId: string | null = null
+      let latestIndex = -1
+      let latestTimestamp = 0
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        messages.forEach((msg, index) => {
+          if (msg.from_user_id !== userId || msg.delivery_status !== "sending") {
+            return
+          }
+
+          const timestamp = Date.parse(msg.created_at)
+          const sortableTimestamp = Number.isNaN(timestamp) ? 0 : timestamp
+          if (sortableTimestamp >= latestTimestamp) {
+            latestTimestamp = sortableTimestamp
+            latestPeerId = peerId
+            latestIndex = index
+          }
+        })
+      })
+
+      if (!latestPeerId || latestIndex < 0) {
+        return prev
+      }
+
+      const targetMessages = prev[latestPeerId]
+      const targetMessage = targetMessages[latestIndex]
+      if (!targetMessage) {
+        return prev
+      }
+
+      const nextMessages = [...targetMessages]
+      nextMessages[latestIndex] = {
+        ...targetMessage,
+        delivery_status: "failed",
+        error_message: normalizedReason,
+      }
+
+      return {
+        ...prev,
+        [latestPeerId]: nextMessages,
+      }
     })
   }, [userId])
 
@@ -501,6 +599,7 @@ export function useChatSocket({
                   ...msg,
                   id: data.message_id,
                   delivery_status: "sent" as const,
+                  error_message: undefined,
                 }
               })
 
@@ -524,6 +623,15 @@ export function useChatSocket({
         }
 
         if (data.type === "error") {
+          if (data.message_id || data.client_message_id) {
+            markOutgoingMessageAsFailed({
+              messageId: data.message_id,
+              clientMessageId: data.client_message_id,
+              reason: data.message,
+            })
+          } else {
+            markLatestOutgoingSendingAsFailed(data.message)
+          }
           setError(data.message)
           console.error("WS error:", data.message)
         }
@@ -550,6 +658,8 @@ export function useChatSocket({
   }, [
     setMessageReactions,
     appendMessage,
+    markLatestOutgoingSendingAsFailed,
+    markOutgoingMessageAsFailed,
     markOutgoingMessageAsDelivered,
     normalizeIncomingMessage,
     scheduleReconnect,
@@ -666,14 +776,21 @@ export function useChatSocket({
       }
 
       appendMessage(localMessage)
-      sendEvent({
+      const sent = sendEvent({
         type: "send_message",
         to_user_id: toUserId,
         text: trimmed,
         client_message_id: clientMessageId,
       })
+
+      if (!sent) {
+        markOutgoingMessageAsFailed({
+          clientMessageId,
+          reason: "Message could not be queued. Please retry.",
+        })
+      }
     },
-    [appendMessage, sendEvent, userId],
+    [appendMessage, markOutgoingMessageAsFailed, sendEvent, userId],
   )
 
   const sendImageMessage = useCallback(
@@ -695,16 +812,115 @@ export function useChatSocket({
       }
 
       appendMessage(localMessage)
-      sendEvent({
+      const sent = sendEvent({
         type: "send_message",
         to_user_id: toUserId,
         text: "",
         image_data_url: normalizedImage,
         client_message_id: clientMessageId,
       })
+
+      if (!sent) {
+        markOutgoingMessageAsFailed({
+          clientMessageId,
+          reason: "Image could not be queued. Please retry.",
+        })
+      }
     },
-    [appendMessage, sendEvent, userId],
+    [appendMessage, markOutgoingMessageAsFailed, sendEvent, userId],
   )
+
+  const retryMessage = useCallback((messageId: string) => {
+    const normalizedMessageId = messageId.trim()
+    if (!normalizedMessageId || !userId) {
+      return false
+    }
+
+    let eventToSend: WsClientEvent | null = null
+    let retried = false
+
+    setMessagesByPeer((prev) => {
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      for (const [peerId, messages] of Object.entries(prev)) {
+        const targetIndex = messages.findIndex((msg) => msg.id === normalizedMessageId)
+        if (targetIndex < 0) {
+          continue
+        }
+
+        const target = messages[targetIndex]
+        if (target.from_user_id !== userId || target.delivery_status !== "failed") {
+          return prev
+        }
+
+        const nextMessages = [...messages]
+        nextMessages[targetIndex] = {
+          ...target,
+          delivery_status: "sending",
+          error_message: undefined,
+        }
+        next[peerId] = nextMessages
+
+        eventToSend = {
+          type: "send_message",
+          to_user_id: target.to_user_id,
+          text: target.text,
+          image_data_url: target.image_data_url,
+          client_message_id: target.client_message_id ?? target.id,
+        }
+        retried = true
+
+        return next
+      }
+
+      return prev
+    })
+
+    if (!retried || !eventToSend) {
+      return false
+    }
+
+    const sent = sendEvent(eventToSend)
+    if (!sent) {
+      markOutgoingMessageAsFailed({
+        messageId: normalizedMessageId,
+        reason: "Message could not be queued. Please retry.",
+      })
+      return false
+    }
+
+    return true
+  }, [markOutgoingMessageAsFailed, sendEvent, userId])
+
+  const deleteMessage = useCallback((messageId: string) => {
+    const normalizedMessageId = messageId.trim()
+    if (!normalizedMessageId) {
+      return false
+    }
+
+    let deleted = false
+
+    setMessagesByPeer((prev) => {
+      const next: Record<string, ChatMessage[]> = { ...prev }
+
+      Object.entries(prev).forEach(([peerId, messages]) => {
+        const filtered = messages.filter((msg) => msg.id !== normalizedMessageId)
+        if (filtered.length !== messages.length) {
+          deleted = true
+          if (filtered.length > 0) {
+            next[peerId] = filtered
+          } else {
+            delete next[peerId]
+          }
+        }
+      })
+
+      return deleted ? next : prev
+    })
+
+    delete serverMessagePeerRef.current[normalizedMessageId]
+    return deleted
+  }, [])
 
   const clearChat = useCallback((peerId: string) => {
     if (!peerId) return
@@ -806,6 +1022,8 @@ export function useChatSocket({
     error,
     sendMessage,
     sendImageMessage,
+    retryMessage,
+    deleteMessage,
     sendHeartMessage,
     clearChat,
   }

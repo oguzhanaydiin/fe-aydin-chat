@@ -10,12 +10,14 @@ import { OwnProfileModal, PeerProfileModal } from "@/app/components/chat/Profile
 type MessageGroup = {
   fromUserId: string
   createdAt: string
-  deliveryStatus?: "sending" | "sent" | "delivered"
+  deliveryStatus?: "sending" | "sent" | "delivered" | "failed"
   messages: Array<{
     id: string
     text: string
     imageDataUrl?: string
     reactions?: Record<string, string[]>
+    deliveryStatus?: "sending" | "sent" | "delivered" | "failed"
+    errorMessage?: string
   }>
 }
 
@@ -53,13 +55,19 @@ type ChatLayoutProps = {
   onMessageChange: (value: string) => void
   onSendMessage: (e: FormEvent) => void
   onHeartMessage: (toUserId: string, messageId: string) => void
+  onRetryMessage: (messageId: string) => boolean
+  onDeleteMessage: (messageId: string) => boolean
   onSendImage: (file: File) => void | Promise<void>
   onSaveProfile: (avatarDataUrl: string | null) => void
 }
 
-function renderOutgoingStatusTick(status?: "sending" | "sent" | "delivered") {
+function renderOutgoingStatusTick(status?: "sending" | "sent" | "delivered" | "failed") {
   if (!status || status === "sending") {
     return <span className="text-gray-200 font-semibold tracking-tight">...</span>
+  }
+
+  if (status === "failed") {
+    return <span className="text-red-300 text-[11px] font-black leading-none">!</span>
   }
 
   if (status === "delivered") {
@@ -80,7 +88,14 @@ function groupMessages(currentMessages: ChatMessage[]) {
       : null
 
     if (lastGroup && lastGroup.fromUserId === msg.from_user_id && lastMinuteKey === minuteKey) {
-      lastGroup.messages.push({ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, reactions: msg.reactions })
+      lastGroup.messages.push({
+        id: msg.id,
+        text: msg.text,
+        imageDataUrl: msg.image_data_url,
+        reactions: msg.reactions,
+        deliveryStatus: msg.delivery_status,
+        errorMessage: msg.error_message,
+      })
       lastGroup.createdAt = msg.created_at
       lastGroup.deliveryStatus = msg.delivery_status
       return groups
@@ -90,7 +105,14 @@ function groupMessages(currentMessages: ChatMessage[]) {
       fromUserId: msg.from_user_id,
       createdAt: msg.created_at,
       deliveryStatus: msg.delivery_status,
-      messages: [{ id: msg.id, text: msg.text, imageDataUrl: msg.image_data_url, reactions: msg.reactions }],
+      messages: [{
+        id: msg.id,
+        text: msg.text,
+        imageDataUrl: msg.image_data_url,
+        reactions: msg.reactions,
+        deliveryStatus: msg.delivery_status,
+        errorMessage: msg.error_message,
+      }],
     })
 
     return groups
@@ -131,6 +153,8 @@ export function ChatLayout({
   onMessageChange,
   onSendMessage,
   onHeartMessage,
+  onRetryMessage,
+  onDeleteMessage,
   onSendImage,
   onSaveProfile,
 }: ChatLayoutProps) {
@@ -618,7 +642,11 @@ export function ChatLayout({
               {groupedMessages.map((group, index) => (
                 <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={`flex ${group.fromUserId === userId ? "justify-end" : "justify-start"}`}>
                   <div className={`max-w-[70%] p-3 rounded-2xl wrap-break-word ${
-                    group.fromUserId === userId ? "bg-blue-600 rounded-br-none" : "bg-gray-700 rounded-bl-none"
+                    group.fromUserId === userId && group.deliveryStatus === "failed"
+                      ? "bg-red-700/80 border border-red-400/50 rounded-br-none"
+                      : group.fromUserId === userId
+                        ? "bg-blue-600 rounded-br-none"
+                        : "bg-gray-700 rounded-bl-none"
                   }`}>
                     <div className="space-y-1.5">
                       {group.messages.map((messagePart) => (
@@ -665,6 +693,33 @@ export function ChatLayout({
                       })}
                       {group.fromUserId === userId && renderOutgoingStatusTick(group.deliveryStatus)}
                     </p>
+                    {group.fromUserId === userId && (
+                      <div className="mt-1 space-y-1">
+                        {group.messages
+                          .filter((messagePart) => messagePart.deliveryStatus === "failed")
+                          .map((messagePart) => (
+                            <div key={`failed-${messagePart.id}`} className="flex flex-wrap items-center justify-end gap-2">
+                              <span className="text-[11px] text-red-200">
+                                {messagePart.errorMessage?.trim() || "Message could not be sent."}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => onRetryMessage(messagePart.id)}
+                                className="rounded-md bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-white/25"
+                              >
+                                Retry
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onDeleteMessage(messagePart.id)}
+                                className="rounded-md bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-100 hover:bg-red-900/70"
+                              >
+                                Delete
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                     <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
                       {group.messages.map((messagePart) => {
                         const heartUsers = messagePart.reactions?.["❤️"] ?? []
