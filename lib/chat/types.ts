@@ -7,7 +7,8 @@ export interface ChatMessage {
   reactions?: Record<string, string[]>
   created_at: string
   client_message_id?: string
-  delivery_status?: "sending" | "sent" | "delivered"
+  delivery_status?: "sending" | "sent" | "delivered" | "failed"
+  error_message?: string
 }
 
 export interface UserProfile {
@@ -79,4 +80,4 @@ export type WsServerEvent =
   | { type: "message_queued", message_id: string, client_message_id?: string }
   | { type: "ack_result", removed_count: number, message_ids?: string[] }
   | { type: "message_delivered", message_id: string, client_message_id?: string }
-  | { type: "error", message: string }
+  | { type: "error", message: string, client_message_id?: string, message_id?: string }

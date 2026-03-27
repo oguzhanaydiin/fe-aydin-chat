@@ -50,6 +50,8 @@ export default function ChatPage() {
     messagesByPeer,
     sendMessage: sendChatMessage,
     sendImageMessage,
+    retryMessage,
+    deleteMessage,
     sendHeartMessage,
     clearChat,
     status: wsStatus,
@@ -210,6 +212,8 @@ export default function ChatPage() {
       onMessageChange={setMessage}
       onSendMessage={sendMessage}
       onHeartMessage={sendHeartMessage}
+      onRetryMessage={retryMessage}
+      onDeleteMessage={deleteMessage}
       onSendImage={onSendImage}
       onSaveProfile={onUpdateProfile}
     />
