@@ -2,9 +2,10 @@ import { useCallback } from "react"
 import { BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH } from "@/lib/chat/constants"
 
 interface UseImageMessageOptions {
-  targetUser: string | null
+  targetConversation: string | null
   userId: string
   sendImageMessage: (toUserId: string, imageDataUrl: string) => void
+  sendGroupImageMessage: (groupId: string, imageDataUrl: string) => void
 }
 
 function fileToDataUrl(file: File) {
@@ -98,12 +99,13 @@ async function optimizeImageForMessage(file: File) {
 }
 
 export function useImageMessage({
-  targetUser,
+  targetConversation,
   userId,
   sendImageMessage,
+  sendGroupImageMessage,
 }: UseImageMessageOptions) {
   const onSendImage = useCallback(async (file: File) => {
-    if (!targetUser || !userId) {
+    if (!targetConversation || !userId) {
       return
     }
 
@@ -125,11 +127,20 @@ export function useImageMessage({
         return
       }
 
-      sendImageMessage(targetUser, imageDataUrl)
+      if (targetConversation.startsWith("group:")) {
+        const groupId = targetConversation.slice("group:".length)
+        if (!groupId) {
+          return
+        }
+
+        sendGroupImageMessage(groupId, imageDataUrl)
+      } else {
+        sendImageMessage(targetConversation, imageDataUrl)
+      }
     } catch {
       window.alert("Image could not be prepared for sending. Try a smaller image.")
     }
-  }, [sendImageMessage, targetUser, userId])
+  }, [sendGroupImageMessage, sendImageMessage, targetConversation, userId])
 
   return { onSendImage }
 }

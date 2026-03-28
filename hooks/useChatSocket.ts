@@ -38,12 +38,13 @@ export function useChatSocket({
 
   const normalizeIncomingMessage = useCallback((incoming: Partial<ChatMessage> & Record<string, unknown>): ChatMessage | null => {
     const id = typeof incoming.id === "string" ? incoming.id : ""
+    const groupId = typeof incoming.group_id === "string" ? incoming.group_id.trim().toLowerCase() : ""
     const fromUserId = typeof incoming.from_user_id === "string"
       ? incoming.from_user_id
       : (typeof incoming.from_username === "string" ? incoming.from_username : "")
     const toUserId = typeof incoming.to_user_id === "string"
       ? incoming.to_user_id
-      : (typeof incoming.to_username === "string" ? incoming.to_username : "")
+      : (typeof incoming.to_username === "string" ? incoming.to_username : (groupId ? `group:${groupId}` : ""))
     const createdAt = typeof incoming.created_at === "string" ? incoming.created_at : new Date().toISOString()
     const text = typeof incoming.text === "string" ? incoming.text : ""
     const imageDataUrl = typeof incoming.image_data_url === "string" ? incoming.image_data_url : undefined
@@ -80,15 +81,16 @@ export function useChatSocket({
       : undefined
     const errorMessage = typeof incoming.error_message === "string" ? incoming.error_message : undefined
 
-    if (!id || !fromUserId || !toUserId) {
+    if (!id || !fromUserId || (!toUserId && !groupId)) {
       return null
     }
 
     return {
       id,
       from_user_id: fromUserId,
-      to_user_id: toUserId,
+      to_user_id: toUserId || `group:${groupId}`,
       text,
+      group_id: groupId || undefined,
       image_data_url: imageDataUrl,
       reactions,
       created_at: createdAt,
@@ -452,7 +454,9 @@ export function useChatSocket({
 
   const appendMessage = useCallback(
     (incoming: ChatMessage) => {
-      const peerId = incoming.from_user_id === userId ? incoming.to_user_id : incoming.from_user_id
+      const peerId = incoming.group_id
+        ? `group:${incoming.group_id}`
+        : (incoming.from_user_id === userId ? incoming.to_user_id : incoming.from_user_id)
 
       setMessagesByPeer((prev) => {
         const existing = prev[peerId] || []
@@ -620,6 +624,24 @@ export function useChatSocket({
           return
         }
 
+        if (data.type === "group_inbox") {
+          const receivedIds: string[] = []
+          data.messages.forEach((msg) => {
+            const normalized = normalizeIncomingMessage(msg as Partial<ChatMessage> & Record<string, unknown>)
+            if (!normalized) {
+              return
+            }
+
+            appendMessage(normalized)
+            receivedIds.push(normalized.id)
+          })
+
+          if (receivedIds.length > 0) {
+            sendEvent({ type: "ack_group", message_ids: receivedIds })
+          }
+          return
+        }
+
         if (data.type === "new_message") {
           const normalized = normalizeIncomingMessage(data.message as Partial<ChatMessage> & Record<string, unknown>)
           if (!normalized) {
@@ -642,7 +664,32 @@ export function useChatSocket({
           return
         }
 
+        if (data.type === "new_group_message") {
+          const normalized = normalizeIncomingMessage(data.message as Partial<ChatMessage> & Record<string, unknown>)
+          if (!normalized) {
+            return
+          }
+
+          appendMessage({
+            ...normalized,
+            delivery_status: normalized.from_user_id === userId ? "sent" : normalized.delivery_status,
+          })
+
+          if (normalized.from_user_id === userId) {
+            const peerId = normalized.group_id ? `group:${normalized.group_id}` : normalized.to_user_id
+            serverMessagePeerRef.current[normalized.id] = peerId
+          }
+
+          sendEvent({ type: "ack_group", message_ids: [normalized.id] })
+          return
+        }
+
         if (data.type === "message_reactions_updated") {
+          setMessageReactions(data.message_id, data.reactions)
+          return
+        }
+
+        if (data.type === "group_message_reactions_updated") {
           setMessageReactions(data.message_id, data.reactions)
           return
         }
@@ -700,7 +747,66 @@ export function useChatSocket({
           return
         }
 
+        if (data.type === "group_message_queued") {
+          if (!data.client_message_id) {
+            return
+          }
+
+          clearPendingSendTimeout(data.client_message_id)
+          clearPendingRetryByClientMessageId(data.client_message_id)
+
+          setMessagesByPeer((prev) => {
+            let changed = false
+            const next: Record<string, ChatMessage[]> = { ...prev }
+
+            Object.entries(prev).forEach(([peerId, messages]) => {
+              let peerChanged = false
+
+              const updatedMessages = messages.map((msg) => {
+                const matchesQueuedMessage = msg.id === data.client_message_id
+                  || msg.client_message_id === data.client_message_id
+
+                if (!matchesQueuedMessage) {
+                  return msg
+                }
+
+                peerChanged = true
+                changed = true
+                serverMessagePeerRef.current[data.message_id] = peerId
+
+                return {
+                  ...msg,
+                  id: data.message_id,
+                  group_id: data.group_id,
+                  to_user_id: `group:${data.group_id}`,
+                  delivery_status: "sent" as const,
+                  error_message: undefined,
+                }
+              })
+
+              if (peerChanged) {
+                next[peerId] = updatedMessages
+              }
+            })
+
+            return changed ? next : prev
+          })
+          return
+        }
+
+        if (data.type === "group_message_delivered") {
+          if (data.client_message_id) {
+            clearPendingSendTimeout(data.client_message_id)
+          }
+          markOutgoingMessageAsDelivered(data.message_id, data.client_message_id)
+          return
+        }
+
         if (data.type === "ack_result") {
+          return
+        }
+
+        if (data.type === "ack_group_result") {
           return
         }
 
@@ -920,6 +1026,88 @@ export function useChatSocket({
     [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
   )
 
+  const sendGroupMessage = useCallback(
+    (groupId: string, text: string) => {
+      const normalizedGroupId = groupId.trim().toLowerCase()
+      const trimmed = text.trim()
+      if (!normalizedGroupId || !trimmed || !userId) return
+
+      const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const groupConversationId = `group:${normalizedGroupId}`
+
+      const localMessage: ChatMessage = {
+        id: clientMessageId,
+        from_user_id: userId,
+        to_user_id: groupConversationId,
+        group_id: normalizedGroupId,
+        text: trimmed,
+        created_at: new Date().toISOString(),
+        client_message_id: clientMessageId,
+        delivery_status: "sending",
+      }
+
+      appendMessage(localMessage)
+      const sent = sendEvent({
+        type: "send_group_message",
+        group_id: normalizedGroupId,
+        text: trimmed,
+        client_message_id: clientMessageId,
+      })
+
+      if (!sent) {
+        markOutgoingMessageAsFailed({
+          clientMessageId,
+          reason: "Message could not be queued. Please retry.",
+        })
+      } else {
+        schedulePendingSendTimeout(clientMessageId, clientMessageId)
+      }
+    },
+    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
+  )
+
+  const sendGroupImageMessage = useCallback(
+    (groupId: string, imageDataUrl: string) => {
+      const normalizedGroupId = groupId.trim().toLowerCase()
+      const normalizedImage = imageDataUrl.trim()
+      if (!normalizedGroupId || !normalizedImage || !userId) return
+
+      const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const groupConversationId = `group:${normalizedGroupId}`
+
+      const localMessage: ChatMessage = {
+        id: clientMessageId,
+        from_user_id: userId,
+        to_user_id: groupConversationId,
+        group_id: normalizedGroupId,
+        text: "",
+        image_data_url: normalizedImage,
+        created_at: new Date().toISOString(),
+        client_message_id: clientMessageId,
+        delivery_status: "sending",
+      }
+
+      appendMessage(localMessage)
+      const sent = sendEvent({
+        type: "send_group_message",
+        group_id: normalizedGroupId,
+        text: "",
+        image_data_url: normalizedImage,
+        client_message_id: clientMessageId,
+      })
+
+      if (!sent) {
+        markOutgoingMessageAsFailed({
+          clientMessageId,
+          reason: "Image could not be queued. Please retry.",
+        })
+      } else {
+        schedulePendingSendTimeout(clientMessageId, clientMessageId)
+      }
+    },
+    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
+  )
+
   const retryMessage = useCallback((messageId: string) => {
     const normalizedMessageId = messageId.trim()
     if (!normalizedMessageId || !userId) {
@@ -959,12 +1147,23 @@ export function useChatSocket({
 
         delete serverMessagePeerRef.current[target.id]
 
-        eventToSend = {
-          type: "send_message",
-          to_user_id: target.to_user_id,
-          text: target.text,
-          image_data_url: target.image_data_url,
-          client_message_id: newClientMessageId,
+        if (target.group_id || target.to_user_id.startsWith("group:")) {
+          const nextGroupId = target.group_id || target.to_user_id.replace(/^group:/, "")
+          eventToSend = {
+            type: "send_group_message",
+            group_id: nextGroupId,
+            text: target.text,
+            image_data_url: target.image_data_url,
+            client_message_id: newClientMessageId,
+          }
+        } else {
+          eventToSend = {
+            type: "send_message",
+            to_user_id: target.to_user_id,
+            text: target.text,
+            image_data_url: target.image_data_url,
+            client_message_id: newClientMessageId,
+          }
         }
         retried = true
         retryQueueKey = newClientMessageId
@@ -1126,20 +1325,35 @@ export function useChatSocket({
     }
   }, [])
 
-  const sendHeartMessage = useCallback((toUserId: string, messageId: string) => {
-    const normalizedTo = toUserId.trim().toLowerCase()
+  const sendHeartMessage = useCallback((conversationId: string, messageId: string) => {
+    const normalizedConversation = conversationId.trim().toLowerCase()
     const normalizedMessageId = messageId.trim()
     const normalizedUserId = userId.trim().toLowerCase()
-    if (!normalizedTo || !normalizedMessageId || !normalizedUserId) {
+    if (!normalizedConversation || !normalizedMessageId || !normalizedUserId) {
       return
     }
 
     const heartReaction = "❤️"
     toggleLocalMessageReaction(normalizedMessageId, heartReaction, normalizedUserId)
+    if (normalizedConversation.startsWith("group:")) {
+      const groupId = normalizedConversation.slice("group:".length)
+      if (!groupId) {
+        return
+      }
+
+      sendEvent({
+        type: "react_group_message",
+        message_id: normalizedMessageId,
+        group_id: groupId,
+        reaction: heartReaction,
+      })
+      return
+    }
+
     sendEvent({
       type: "react_message",
       message_id: normalizedMessageId,
-      to_username: normalizedTo,
+      to_username: normalizedConversation,
       reaction: heartReaction,
     })
   }, [sendEvent, toggleLocalMessageReaction, userId])
@@ -1152,6 +1366,8 @@ export function useChatSocket({
     error,
     sendMessage,
     sendImageMessage,
+    sendGroupMessage,
+    sendGroupImageMessage,
     retryMessage,
     deleteMessage,
     sendHeartMessage,

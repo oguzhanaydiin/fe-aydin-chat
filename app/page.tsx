@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react"
 import { useChatSocket } from "@/hooks/useChatSocket"
 import { useAuthFlow } from "@/hooks/useAuthFlow"
 import { useFriendship } from "@/hooks/useFriendship"
+import { useGroups } from "@/hooks/useGroups"
 import { useImageMessage } from "@/hooks/useImageMessage"
 import { useChatActivity } from "@/hooks/useChatActivity"
 import {
@@ -50,6 +51,8 @@ export default function ChatPage() {
     messagesByPeer,
     sendMessage: sendChatMessage,
     sendImageMessage,
+    sendGroupMessage,
+    sendGroupImageMessage,
     retryMessage,
     deleteMessage,
     sendHeartMessage,
@@ -86,6 +89,19 @@ export default function ChatPage() {
     setTargetUser,
     setMessage,
     clearChat,
+  })
+
+  const {
+    groups,
+    groupsError,
+    onCreateGroup,
+    onAddGroupMember,
+    onGrantInvitePermission,
+    onPromoteGroupLeader,
+    resetGroupsState,
+  } = useGroups({
+    token,
+    isAuthenticated: Boolean(authSession),
   })
 
   const scrollToBottom = () => {
@@ -125,16 +141,26 @@ export default function ChatPage() {
         return
       }
 
-      sendChatMessage(targetUser, trimmed)
+      if (targetUser.startsWith("group:")) {
+        const groupId = targetUser.slice("group:".length)
+        if (!groupId) {
+          return
+        }
+
+        sendGroupMessage(groupId, trimmed)
+      } else {
+        sendChatMessage(targetUser, trimmed)
+      }
 
       setMessage("")
     }
   }
 
   const { onSendImage } = useImageMessage({
-    targetUser,
+    targetConversation: targetUser,
     userId,
     sendImageMessage,
+    sendGroupImageMessage,
   })
 
   const currentMessages = targetUser ? messagesByPeer[targetUser] || [] : []
@@ -144,7 +170,56 @@ export default function ChatPage() {
     setTargetUser(null)
     setMessage("")
     resetFriendshipState()
+    resetGroupsState()
     resetChatActivityState()
+  }
+
+  const onCreateGroupClick = async () => {
+    const name = window.prompt("Group name")?.trim() || ""
+    if (!name) {
+      return
+    }
+
+    const membersRaw = window.prompt("Initial members (comma separated usernames, optional)")?.trim() || ""
+    const memberUsernames = membersRaw
+      .split(",")
+      .map((item) => item.trim().toLowerCase())
+      .filter(Boolean)
+
+    const ok = await onCreateGroup(name, memberUsernames)
+    if (ok) {
+      const created = groups.find((item) => item.name.toLowerCase() === name.toLowerCase())
+      if (created) {
+        setTargetUser(`group:${created.group_id}`)
+      }
+    }
+  }
+
+  const onAddGroupMemberClick = async (groupId: string) => {
+    const username = window.prompt("Username to add")?.trim().toLowerCase() || ""
+    if (!username) {
+      return
+    }
+
+    await onAddGroupMember(groupId, username)
+  }
+
+  const onGrantInvitePermissionClick = async (groupId: string) => {
+    const username = window.prompt("Give invite permission to username")?.trim().toLowerCase() || ""
+    if (!username) {
+      return
+    }
+
+    await onGrantInvitePermission(groupId, username)
+  }
+
+  const onPromoteLeaderClick = async (groupId: string) => {
+    const username = window.prompt("Promote to leader (username)")?.trim().toLowerCase() || ""
+    if (!username) {
+      return
+    }
+
+    await onPromoteGroupLeader(groupId, username)
   }
 
   if (!authSession) {
@@ -203,6 +278,13 @@ export default function ChatPage() {
       messagesEndRef={messagesEndRef}
       onStartChat={startChat}
       onOpenAddUserModal={onOpenAddUserModal}
+      groups={groups}
+      groupsError={groupsError}
+      onStartGroupChat={(groupId) => setTargetUser(`group:${groupId}`)}
+      onCreateGroup={onCreateGroupClick}
+      onAddGroupMember={onAddGroupMemberClick}
+      onGrantInvitePermission={onGrantInvitePermissionClick}
+      onPromoteLeader={onPromoteLeaderClick}
       onCloseAddUserModal={onCloseAddUserModal}
       onSendFriendRequest={onSendFriendRequest}
       onAcceptFriendRequest={onAcceptFriendRequest}
