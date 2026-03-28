@@ -95,6 +95,7 @@ export default function ChatPage() {
     groups,
     groupsError,
     onCreateGroup,
+    onGetGroupDetail,
     onAddGroupMember,
     onGrantInvitePermission,
     onPromoteGroupLeader,
@@ -184,33 +185,6 @@ export default function ChatPage() {
     return true
   }
 
-  const onAddGroupMemberClick = async (groupId: string) => {
-    const username = window.prompt("Username to add")?.trim().toLowerCase() || ""
-    if (!username) {
-      return
-    }
-
-    await onAddGroupMember(groupId, username)
-  }
-
-  const onGrantInvitePermissionClick = async (groupId: string) => {
-    const username = window.prompt("Give invite permission to username")?.trim().toLowerCase() || ""
-    if (!username) {
-      return
-    }
-
-    await onGrantInvitePermission(groupId, username)
-  }
-
-  const onPromoteLeaderClick = async (groupId: string) => {
-    const username = window.prompt("Promote to leader (username)")?.trim().toLowerCase() || ""
-    if (!username) {
-      return
-    }
-
-    await onPromoteGroupLeader(groupId, username)
-  }
-
   if (!authSession) {
     return (
       <LoginView
@@ -271,9 +245,10 @@ export default function ChatPage() {
       groupsError={groupsError}
       onStartGroupChat={(groupId) => setTargetUser(`group:${groupId}`)}
       onCreateGroup={onCreateGroupClick}
-      onAddGroupMember={onAddGroupMemberClick}
-      onGrantInvitePermission={onGrantInvitePermissionClick}
-      onPromoteLeader={onPromoteLeaderClick}
+      onGetGroupDetail={onGetGroupDetail}
+      onAddGroupMember={onAddGroupMember}
+      onGrantInvitePermission={onGrantInvitePermission}
+      onPromoteLeader={onPromoteGroupLeader}
       onCloseAddUserModal={onCloseAddUserModal}
       onSendFriendRequest={onSendFriendRequest}
       onAcceptFriendRequest={onAcceptFriendRequest}

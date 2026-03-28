@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react"
-import { addGroupMember, createGroup, fetchGroups, updateGroupMemberPermissions } from "@/lib/chat/authApi"
-import type { GroupSummary } from "@/lib/chat/types"
+import { addGroupMember, createGroup, fetchGroupDetail, fetchGroups, updateGroupMemberPermissions } from "@/lib/chat/authApi"
+import type { GroupDetail, GroupSummary } from "@/lib/chat/types"
 
 interface UseGroupsOptions {
   token: string
@@ -122,6 +122,24 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
     }
   }, [reloadGroups, token])
 
+  const onGetGroupDetail = useCallback(async (groupId: string): Promise<GroupDetail | null> => {
+    if (!token) {
+      return null
+    }
+
+    const normalizedGroupId = groupId.trim()
+    if (!normalizedGroupId) {
+      return null
+    }
+
+    try {
+      return await fetchGroupDetail(token, normalizedGroupId)
+    } catch (err) {
+      setGroupsError(err instanceof Error ? err.message : "Could not load group details")
+      return null
+    }
+  }, [token])
+
   const resetGroupsState = useCallback(() => {
     setGroups([])
     setGroupsLoading(false)
@@ -134,6 +152,7 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
     groupsError,
     reloadGroups,
     onCreateGroup,
+    onGetGroupDetail,
     onAddGroupMember,
     onGrantInvitePermission,
     onPromoteGroupLeader,

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, FormEvent, RefObject } from "react"
 import Image from "next/image"
-import type { ChatMessage, GroupSummary } from "@/lib/chat/types"
+import type { ChatMessage, GroupDetail, GroupSummary } from "@/lib/chat/types"
 import { AddFriendModal } from "@/app/components/chat/AddFriendModal"
 import { ConfirmModal } from "@/app/components/chat/ConfirmModal"
 import { CreateGroupModal } from "@/app/components/chat/CreateGroupModal"
 import { FriendListModal } from "@/app/components/chat/FriendListModal"
+import { GroupMembersModal } from "@/app/components/chat/GroupMembersModal"
 import { OwnProfileModal, PeerProfileModal } from "@/app/components/chat/ProfileModal"
 
 type MessageGroup = {
@@ -51,9 +52,10 @@ type ChatLayoutProps = {
   groupsError: string | null
   onStartGroupChat: (groupId: string) => void
   onCreateGroup: (name: string, memberUsernames: string[]) => Promise<boolean>
-  onAddGroupMember: (groupId: string) => void
-  onGrantInvitePermission: (groupId: string) => void
-  onPromoteLeader: (groupId: string) => void
+  onGetGroupDetail: (groupId: string) => Promise<GroupDetail | null>
+  onAddGroupMember: (groupId: string, username: string) => Promise<boolean>
+  onGrantInvitePermission: (groupId: string, username: string) => Promise<boolean>
+  onPromoteLeader: (groupId: string, username: string) => Promise<boolean>
   onCloseAddUserModal: () => void
   onSendFriendRequest: (userId: string) => void
   onAcceptFriendRequest: (userId: string) => void
@@ -156,6 +158,7 @@ export function ChatLayout({
   groupsError,
   onStartGroupChat,
   onCreateGroup,
+  onGetGroupDetail,
   onAddGroupMember,
   onGrantInvitePermission,
   onPromoteLeader,
@@ -181,6 +184,10 @@ export function ChatLayout({
   const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false)
   const [createGroupLoading, setCreateGroupLoading] = useState(false)
+  const [isGroupMembersModalOpen, setIsGroupMembersModalOpen] = useState(false)
+  const [groupMembersDetail, setGroupMembersDetail] = useState<GroupDetail | null>(null)
+  const [groupMembersLoading, setGroupMembersLoading] = useState(false)
+  const [groupMembersActionLoading, setGroupMembersActionLoading] = useState(false)
   const [isOwnProfileOpen, setIsOwnProfileOpen] = useState(false)
   const [peerProfileUsername, setPeerProfileUsername] = useState<string | null>(null)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -197,6 +204,31 @@ export function ChatLayout({
   const selectedGroup = selectedGroupId
     ? groups.find((group) => group.group_id === selectedGroupId) ?? null
     : null
+
+  const openGroupMembersModal = async () => {
+    if (!selectedGroup) {
+      return
+    }
+
+    setIsGroupMembersModalOpen(true)
+    setGroupMembersLoading(true)
+
+    try {
+      const detail = await onGetGroupDetail(selectedGroup.group_id)
+      setGroupMembersDetail(detail)
+    } finally {
+      setGroupMembersLoading(false)
+    }
+  }
+
+  const refreshGroupMembersDetail = async () => {
+    if (!selectedGroup) {
+      return
+    }
+
+    const detail = await onGetGroupDetail(selectedGroup.group_id)
+    setGroupMembersDetail(detail)
+  }
 
   const normalizedSearchQuery = searchQuery.trim().toLowerCase()
   const searchResults = useMemo(() => {
@@ -452,11 +484,8 @@ export function ChatLayout({
                       : "border-slate-500/35 bg-slate-700/25 hover:bg-slate-600/30"
                   }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-semibold text-teal-100">{group.name}</span>
-                    <span className="text-[10px] uppercase tracking-wide text-teal-200/80">{group.role}</span>
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-teal-200/70">{group.member_count} members</p>
+                  <span className="block truncate text-sm font-semibold text-teal-100">{group.name}</span>
+                  <p className="mt-0.5 text-[11px] text-teal-200/70">Group chat • {group.member_count} members</p>
                 </button>
               ))}
             </div>
@@ -587,6 +616,55 @@ export function ChatLayout({
         }}
       />
 
+      <GroupMembersModal
+        isOpen={isGroupMembersModalOpen && Boolean(selectedGroup)}
+        groupName={selectedGroup?.name ?? "Group"}
+        groupId={selectedGroup?.group_id ?? ""}
+        currentUserRole={selectedGroup?.role ?? "member"}
+        friends={friends}
+        detail={groupMembersDetail}
+        loading={groupMembersLoading}
+        error={groupsError}
+        actionLoading={groupMembersActionLoading}
+        onClose={() => setIsGroupMembersModalOpen(false)}
+        onAddMember={async (groupId, username) => {
+          setGroupMembersActionLoading(true)
+          try {
+            const ok = await onAddGroupMember(groupId, username)
+            if (ok) {
+              await refreshGroupMembersDetail()
+            }
+            return ok
+          } finally {
+            setGroupMembersActionLoading(false)
+          }
+        }}
+        onGrantInvite={async (groupId, username) => {
+          setGroupMembersActionLoading(true)
+          try {
+            const ok = await onGrantInvitePermission(groupId, username)
+            if (ok) {
+              await refreshGroupMembersDetail()
+            }
+            return ok
+          } finally {
+            setGroupMembersActionLoading(false)
+          }
+        }}
+        onPromoteLeader={async (groupId, username) => {
+          setGroupMembersActionLoading(true)
+          try {
+            const ok = await onPromoteLeader(groupId, username)
+            if (ok) {
+              await refreshGroupMembersDetail()
+            }
+            return ok
+          } finally {
+            setGroupMembersActionLoading(false)
+          }
+        }}
+      />
+
       <FriendListModal
         isOpen={isFriendListModalOpen}
         friends={friends}
@@ -618,43 +696,33 @@ export function ChatLayout({
           <>
             <div className="p-4 border-b border-gray-700 bg-gray-800 flex items-center shadow-sm">
               <div className="flex w-full items-center justify-between gap-4">
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!targetUser.startsWith("group:")) {
-                      setPeerProfileUsername(targetUser)
-                    }
-                  }}
-                  className="font-bold text-lg hover:underline text-left"
-                >
-                  Chat: <span className="text-blue-400">{selectedGroup ? selectedGroup.name : targetUser}</span>
-                </button>
                 <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!targetUser.startsWith("group:")) {
+                        setPeerProfileUsername(targetUser)
+                      }
+                    }}
+                    className="font-bold text-lg hover:underline text-left"
+                  >
+                    Chat: <span className="text-blue-400">{selectedGroup ? selectedGroup.name : targetUser}</span>
+                  </button>
                   {selectedGroup ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => onAddGroupMember(selectedGroup.group_id)}
-                        className="flex h-7 items-center rounded-md border border-teal-600/60 px-3 text-xs text-teal-200 transition hover:bg-teal-700/30"
-                      >
-                        Add Member
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onGrantInvitePermission(selectedGroup.group_id)}
-                        className="flex h-7 items-center rounded-md border border-amber-600/60 px-3 text-xs text-amber-200 transition hover:bg-amber-700/30"
-                      >
-                        Grant Invite
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => onPromoteLeader(selectedGroup.group_id)}
-                        className="flex h-7 items-center rounded-md border border-fuchsia-600/60 px-3 text-xs text-fuchsia-200 transition hover:bg-fuchsia-700/30"
-                      >
-                        Promote Leader
-                      </button>
-                    </>
+                    <button
+                      type="button"
+                      title="Group members and permissions"
+                      aria-label="Group members and permissions"
+                      onClick={() => {
+                        void openGroupMembersModal()
+                      }}
+                      className="h-7 rounded-md border border-teal-600/60 px-2.5 text-xs text-teal-200 transition hover:bg-teal-700/30"
+                    >
+                      Members
+                    </button>
                   ) : null}
+                </div>
+                <div className="flex items-center gap-2">
                   <div className="relative h-7 w-[360px]">
                     <div
                       className={`absolute right-0 top-0 flex h-7 items-center gap-2 rounded-md border border-gray-600 bg-gray-700/60 px-2 transition-all duration-300 ease-in-out ${

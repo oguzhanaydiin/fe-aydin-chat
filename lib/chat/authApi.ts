@@ -245,6 +245,22 @@ export async function createGroup(token: string, name: string, memberUsernames: 
   return (await response.json()) as GroupDetail
 }
 
+export async function fetchGroupDetail(token: string, groupId: string): Promise<GroupDetail> {
+  const response = await fetch(`${API_URL}/groups/${encodeURIComponent(groupId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to fetch group details")
+  }
+
+  return (await response.json()) as GroupDetail
+}
+
 export async function addGroupMember(token: string, groupId: string, username: string): Promise<void> {
   const response = await fetch(`${API_URL}/groups/${encodeURIComponent(groupId)}/members`, {
     method: "POST",
