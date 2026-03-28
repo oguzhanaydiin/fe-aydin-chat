@@ -4,6 +4,7 @@ import Image from "next/image"
 import type { ChatMessage, GroupSummary } from "@/lib/chat/types"
 import { AddFriendModal } from "@/app/components/chat/AddFriendModal"
 import { ConfirmModal } from "@/app/components/chat/ConfirmModal"
+import { CreateGroupModal } from "@/app/components/chat/CreateGroupModal"
 import { FriendListModal } from "@/app/components/chat/FriendListModal"
 import { OwnProfileModal, PeerProfileModal } from "@/app/components/chat/ProfileModal"
 
@@ -49,7 +50,7 @@ type ChatLayoutProps = {
   groups: GroupSummary[]
   groupsError: string | null
   onStartGroupChat: (groupId: string) => void
-  onCreateGroup: () => void
+  onCreateGroup: (name: string, memberUsernames: string[]) => Promise<boolean>
   onAddGroupMember: (groupId: string) => void
   onGrantInvitePermission: (groupId: string) => void
   onPromoteLeader: (groupId: string) => void
@@ -178,6 +179,8 @@ export function ChatLayout({
   const messageElementRefs = useRef<Record<string, HTMLDivElement | null>>({})
   const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
   const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
+  const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false)
+  const [createGroupLoading, setCreateGroupLoading] = useState(false)
   const [isOwnProfileOpen, setIsOwnProfileOpen] = useState(false)
   const [peerProfileUsername, setPeerProfileUsername] = useState<string | null>(null)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
@@ -430,7 +433,7 @@ export function ChatLayout({
               <p className="text-xs font-semibold uppercase tracking-wide text-teal-300">Groups</p>
               <button
                 type="button"
-                onClick={onCreateGroup}
+                onClick={() => setIsCreateGroupModalOpen(true)}
                 className="rounded-md bg-teal-600 px-2.5 py-1 text-[11px] font-semibold text-white transition hover:bg-teal-500"
               >
                 New Group
@@ -564,6 +567,24 @@ export function ChatLayout({
         actionError={friendActionError}
         onClose={onCloseAddUserModal}
         onSendFriendRequest={onSendFriendRequest}
+      />
+
+      <CreateGroupModal
+        isOpen={isCreateGroupModalOpen}
+        friends={friends}
+        displayName={displayName}
+        userId={userId}
+        loading={createGroupLoading}
+        error={groupsError}
+        onClose={() => setIsCreateGroupModalOpen(false)}
+        onSubmit={async (name, memberUsernames) => {
+          setCreateGroupLoading(true)
+          try {
+            return await onCreateGroup(name, memberUsernames)
+          } finally {
+            setCreateGroupLoading(false)
+          }
+        }}
       />
 
       <FriendListModal

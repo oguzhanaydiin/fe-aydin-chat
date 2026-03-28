@@ -174,25 +174,14 @@ export default function ChatPage() {
     resetChatActivityState()
   }
 
-  const onCreateGroupClick = async () => {
-    const name = window.prompt("Group name")?.trim() || ""
-    if (!name) {
-      return
+  const onCreateGroupClick = async (name: string, memberUsernames: string[]) => {
+    const createdGroupId = await onCreateGroup(name, memberUsernames)
+    if (!createdGroupId) {
+      return false
     }
 
-    const membersRaw = window.prompt("Initial members (comma separated usernames, optional)")?.trim() || ""
-    const memberUsernames = membersRaw
-      .split(",")
-      .map((item) => item.trim().toLowerCase())
-      .filter(Boolean)
-
-    const ok = await onCreateGroup(name, memberUsernames)
-    if (ok) {
-      const created = groups.find((item) => item.name.toLowerCase() === name.toLowerCase())
-      if (created) {
-        setTargetUser(`group:${created.group_id}`)
-      }
-    }
+    setTargetUser(`group:${createdGroupId}`)
+    return true
   }
 
   const onAddGroupMemberClick = async (groupId: string) => {

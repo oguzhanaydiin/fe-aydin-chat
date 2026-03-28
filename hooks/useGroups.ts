@@ -37,21 +37,21 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
 
   const onCreateGroup = useCallback(async (name: string, initialMembers: string[]) => {
     if (!token) {
-      return false
+      return null
     }
 
     const normalizedName = name.trim()
     if (!normalizedName) {
-      return false
+      return null
     }
 
     try {
-      await createGroup(token, normalizedName, initialMembers)
+      const createdGroup = await createGroup(token, normalizedName, initialMembers)
       await reloadGroups()
-      return true
+      return createdGroup.group_id
     } catch (err) {
       setGroupsError(err instanceof Error ? err.message : "Could not create group")
-      return false
+      return null
     }
   }, [reloadGroups, token])
 
