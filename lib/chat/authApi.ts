@@ -1,6 +1,8 @@
 import type {
   AuthSessionResponse,
   FriendSnapshot,
+  GroupDetail,
+  GroupSummary,
   PublicProfile,
   SaveUsernameResponse,
   SendOtpResponse,
@@ -186,6 +188,113 @@ export async function removeFriend(token: string, username: string): Promise<voi
   if (!response.ok) {
     const message = await response.text()
     throw new Error(message || "Failed to remove friend")
+  }
+}
+
+function normalizeGroupSummaryList(payload: unknown): GroupSummary[] {
+  if (!Array.isArray(payload)) {
+    return []
+  }
+
+  return payload
+    .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+    .map((item) => {
+      const role = item.role === "leader" ? "leader" : "member"
+      return {
+        group_id: typeof item.group_id === "string" ? item.group_id : "",
+        name: typeof item.name === "string" ? item.name : "",
+        role,
+        can_invite: Boolean(item.can_invite),
+        member_count: typeof item.member_count === "number" ? item.member_count : 0,
+      } as GroupSummary
+    })
+    .filter((item) => item.group_id && item.name)
+}
+
+export async function fetchGroups(token: string): Promise<GroupSummary[]> {
+  const response = await fetch(`${API_URL}/groups`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to fetch groups")
+  }
+
+  return normalizeGroupSummaryList(await response.json())
+}
+
+export async function createGroup(token: string, name: string, memberUsernames: string[]): Promise<GroupDetail> {
+  const response = await fetch(`${API_URL}/groups`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ name, member_usernames: memberUsernames }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to create group")
+  }
+
+  return (await response.json()) as GroupDetail
+}
+
+export async function fetchGroupDetail(token: string, groupId: string): Promise<GroupDetail> {
+  const response = await fetch(`${API_URL}/groups/${encodeURIComponent(groupId)}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to fetch group details")
+  }
+
+  return (await response.json()) as GroupDetail
+}
+
+export async function addGroupMember(token: string, groupId: string, username: string): Promise<void> {
+  const response = await fetch(`${API_URL}/groups/${encodeURIComponent(groupId)}/members`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ username }),
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to add group member")
+  }
+}
+
+export async function updateGroupMemberPermissions(
+  token: string,
+  groupId: string,
+  username: string,
+  payload: { role?: "leader" | "member"; can_invite?: boolean },
+): Promise<void> {
+  const response = await fetch(`${API_URL}/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(username)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  })
+
+  if (!response.ok) {
+    const message = await response.text()
+    throw new Error(message || "Failed to update group permissions")
   }
 }
 

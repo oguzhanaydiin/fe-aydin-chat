@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react"
 import { useChatSocket } from "@/hooks/useChatSocket"
 import { useAuthFlow } from "@/hooks/useAuthFlow"
 import { useFriendship } from "@/hooks/useFriendship"
+import { useGroups } from "@/hooks/useGroups"
 import { useImageMessage } from "@/hooks/useImageMessage"
 import { useChatActivity } from "@/hooks/useChatActivity"
 import {
@@ -50,6 +51,8 @@ export default function ChatPage() {
     messagesByPeer,
     sendMessage: sendChatMessage,
     sendImageMessage,
+    sendGroupMessage,
+    sendGroupImageMessage,
     retryMessage,
     deleteMessage,
     sendHeartMessage,
@@ -86,6 +89,20 @@ export default function ChatPage() {
     setTargetUser,
     setMessage,
     clearChat,
+  })
+
+  const {
+    groups,
+    groupsError,
+    onCreateGroup,
+    onGetGroupDetail,
+    onAddGroupMember,
+    onGrantInvitePermission,
+    onPromoteGroupLeader,
+    resetGroupsState,
+  } = useGroups({
+    token,
+    isAuthenticated: Boolean(authSession),
   })
 
   const scrollToBottom = () => {
@@ -125,16 +142,26 @@ export default function ChatPage() {
         return
       }
 
-      sendChatMessage(targetUser, trimmed)
+      if (targetUser.startsWith("group:")) {
+        const groupId = targetUser.slice("group:".length)
+        if (!groupId) {
+          return
+        }
+
+        sendGroupMessage(groupId, trimmed)
+      } else {
+        sendChatMessage(targetUser, trimmed)
+      }
 
       setMessage("")
     }
   }
 
   const { onSendImage } = useImageMessage({
-    targetUser,
+    targetConversation: targetUser,
     userId,
     sendImageMessage,
+    sendGroupImageMessage,
   })
 
   const currentMessages = targetUser ? messagesByPeer[targetUser] || [] : []
@@ -144,7 +171,18 @@ export default function ChatPage() {
     setTargetUser(null)
     setMessage("")
     resetFriendshipState()
+    resetGroupsState()
     resetChatActivityState()
+  }
+
+  const onCreateGroupClick = async (name: string, memberUsernames: string[]) => {
+    const createdGroupId = await onCreateGroup(name, memberUsernames)
+    if (!createdGroupId) {
+      return false
+    }
+
+    setTargetUser(`group:${createdGroupId}`)
+    return true
   }
 
   if (!authSession) {
@@ -203,6 +241,14 @@ export default function ChatPage() {
       messagesEndRef={messagesEndRef}
       onStartChat={startChat}
       onOpenAddUserModal={onOpenAddUserModal}
+      groups={groups}
+      groupsError={groupsError}
+      onStartGroupChat={(groupId) => setTargetUser(`group:${groupId}`)}
+      onCreateGroup={onCreateGroupClick}
+      onGetGroupDetail={onGetGroupDetail}
+      onAddGroupMember={onAddGroupMember}
+      onGrantInvitePermission={onGrantInvitePermission}
+      onPromoteLeader={onPromoteGroupLeader}
       onCloseAddUserModal={onCloseAddUserModal}
       onSendFriendRequest={onSendFriendRequest}
       onAcceptFriendRequest={onAcceptFriendRequest}
