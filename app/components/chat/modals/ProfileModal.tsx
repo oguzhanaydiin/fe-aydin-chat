@@ -1,9 +1,9 @@
-"use client"
+﻿"use client"
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { GenericModal } from "@/app/components/chat/GenericModal"
-import { getUserProfile } from "@/lib/chat/authApi"
-import type { PublicProfile } from "@/lib/chat/types"
+import { GenericModal } from "@/app/components/ui/modal/GenericModal"
+import { getUserProfile } from "@/utils/chatApi"
+import type { PublicProfile } from "@/utils/chatTypes"
 
 const MAX_AVATAR_BYTES = 512 * 1024 // 512 KB
 
@@ -78,7 +78,7 @@ function AvatarPlaceholder({ username }: { username: string }) {
   )
 }
 
-// ─── Own profile (editable) ────────────────────────────────────────────────
+// â”€â”€â”€ Own profile (editable) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type OwnProfileModalProps = {
   isOpen: boolean
@@ -175,7 +175,7 @@ export function OwnProfileModal({
             title="Change avatar"
             disabled={avatarLoading}
           >
-            ✏
+            âœ
           </button>
         </div>
         <input
@@ -236,7 +236,7 @@ export function OwnProfileModal({
   )
 }
 
-// ─── Peer profile (read-only, fetched on open) ─────────────────────────────
+// â”€â”€â”€ Peer profile (read-only, fetched on open) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 type PeerProfileModalProps = {
   isOpen: boolean

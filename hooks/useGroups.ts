@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react"
-import { addGroupMember, createGroup, fetchGroupDetail, fetchGroups, updateGroupMemberPermissions } from "@/lib/chat/authApi"
-import type { GroupDetail, GroupSummary } from "@/lib/chat/types"
+﻿import { useCallback, useEffect, useState } from "react"
+import { addGroupMember, createGroup, fetchGroupDetail, fetchGroups, updateGroupMemberPermissions } from "@/utils/chatApi"
+import type { GroupDetail, GroupSummary } from "@/utils/chatTypes"
 
 interface UseGroupsOptions {
   token: string

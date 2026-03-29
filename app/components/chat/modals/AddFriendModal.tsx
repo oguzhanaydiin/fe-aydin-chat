@@ -1,4 +1,4 @@
-import { GenericModal } from "@/app/components/chat/GenericModal"
+import { GenericModal } from "@/app/components/ui/modal/GenericModal"
 
 type AddFriendModalProps = {
   isOpen: boolean

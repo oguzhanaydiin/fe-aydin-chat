@@ -1,4 +1,4 @@
-"use client"
+﻿"use client"
 import { useEffect, useState, useRef } from "react"
 import { useChatSocket } from "@/hooks/useChatSocket"
 import { useAuthFlow } from "@/hooks/useAuthFlow"
@@ -9,10 +9,10 @@ import { useChatActivity } from "@/hooks/useChatActivity"
 import {
   WS_URL,
   resolveMaxWsTextLength,
-} from "@/lib/chat/constants"
-import { LoginView } from "@/app/components/chat/LoginView"
-import { UsernameSetupView } from "@/app/components/chat/UsernameSetupView"
-import { ChatLayout } from "@/app/components/chat/ChatLayout"
+} from "@/utils/chatConfig"
+import { LoginView } from "@/app/components/layout/LoginView"
+import { UsernameSetupView } from "@/app/components/layout/UsernameSetupView"
+import { ChatLayout } from "@/app/components/layout/ChatLayout"
 
 export default function ChatPage() {
   const maxWsTextLength = resolveMaxWsTextLength()

@@ -2,12 +2,12 @@
 import type { ChangeEvent, FormEvent, RefObject } from "react"
 import Image from "next/image"
 import type { ChatMessage, GroupDetail, GroupSummary } from "@/utils/chatTypes"
-import { AddFriendModal } from "@/app/components/chat/modals/AddFriendModal"
-import { ConfirmModal } from "@/app/components/chat/modals/ConfirmModal"
-import { CreateGroupModal } from "@/app/components/chat/modals/CreateGroupModal"
-import { FriendListModal } from "@/app/components/chat/modals/FriendListModal"
-import { GroupMembersModal } from "@/app/components/chat/modals/GroupMembersModal"
-import { OwnProfileModal, PeerProfileModal } from "@/app/components/chat/modals/ProfileModal"
+import { AddFriendModal } from "@/app/components/ui/modals/AddFriendModal"
+import { ConfirmModal } from "@/app/components/ui/modals/ConfirmModal"
+import { CreateGroupModal } from "@/app/components/ui/modals/CreateGroupModal"
+import { FriendListModal } from "@/app/components/ui/modals/FriendListModal"
+import { GroupMembersModal } from "@/app/components/ui/modals/GroupMembersModal"
+import { OwnProfileModal, PeerProfileModal } from "@/app/components/ui/modals/ProfileModal"
 import { AccordionSection } from "@/app/components/ui/AccordionSection"
 
 type MessageGroup = {

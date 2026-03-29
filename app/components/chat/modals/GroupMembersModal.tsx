@@ -1,7 +1,7 @@
-import { useMemo, useState } from "react"
-import { GenericModal } from "@/app/components/chat/GenericModal"
-import type { GroupDetail } from "@/lib/chat/types"
-import { normalizeIdentity } from "@/lib/chat/utils"
+﻿import { useMemo, useState } from "react"
+import { GenericModal } from "@/app/components/ui/modal/GenericModal"
+import type { GroupDetail } from "@/utils/chatTypes"
+import { normalizeIdentity } from "@/utils/identity"
 
 type GroupMembersModalProps = {
   isOpen: boolean
@@ -123,7 +123,7 @@ export function GroupMembersModal({
                 <p className="truncate text-sm font-semibold text-gray-100">{member.username}</p>
                 <p className="text-xs text-gray-400">
                   {isLeader ? "Leader" : "Member"}
-                  {hasInvite ? " • Can invite" : ""}
+                  {hasInvite ? " â€¢ Can invite" : ""}
                 </p>
               </div>
 

@@ -1,13 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from "react"
+﻿import { useCallback, useEffect, useRef, useState } from "react"
 import {
   acceptFriendRequest,
   fetchAllUsers,
   fetchFriendSnapshot,
   removeFriend,
   sendFriendRequest,
-} from "@/lib/chat/authApi"
-import type { ConnectionStatus, FriendSnapshot } from "@/lib/chat/types"
-import { normalizeIdentity } from "@/lib/chat/utils"
+} from "@/utils/chatApi"
+import type { ConnectionStatus, FriendSnapshot } from "@/utils/chatTypes"
+import { normalizeIdentity } from "@/utils/identity"
 
 interface UseFriendshipOptions {
   token: string
