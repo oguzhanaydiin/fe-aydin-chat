@@ -123,7 +123,7 @@ export function GroupMembersModal({
                 <p className="truncate text-sm font-semibold text-gray-100">{member.username}</p>
                 <p className="text-xs text-gray-400">
                   {isLeader ? "Leader" : "Member"}
-                  {hasInvite ? " â€¢ Can invite" : ""}
+                  {hasInvite ? " \u2022 Can invite" : ""}
                 </p>
               </div>
 

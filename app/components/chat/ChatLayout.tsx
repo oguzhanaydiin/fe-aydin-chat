@@ -506,7 +506,7 @@ export function ChatLayout({
                 }`}
               >
                 <span className="block truncate text-sm font-semibold text-teal-100">{group.name}</span>
-                <p className="mt-0.5 text-[11px] text-teal-200/70">Group chat â€¢ {group.member_count} members</p>
+                <p className="mt-0.5 text-[11px] text-teal-200/70">Group chat {"\u2022"} {group.member_count} members</p>
               </button>
             ))}
             {groupsError ? (
@@ -929,7 +929,7 @@ export function ChatLayout({
                             title={`Hearted by: ${heartUsers.join(", ")}`}
                             aria-label="Toggle heart reaction"
                           >
-                            <span aria-label="hearted message" role="img">â¤ï¸</span>
+                            <span aria-label="hearted message" role="img">❤️</span>
                             <span>{heartUsers.length}</span>
                           </button>
                         )
@@ -978,7 +978,7 @@ export function ChatLayout({
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
             <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4">
-              <span className="text-2xl">ðŸ‘‹</span>
+              <span className="text-2xl">{"\u{1F44B}"}</span>
             </div>
             <p>Select a friend or a group from the left to start chatting.</p>
           </div>
