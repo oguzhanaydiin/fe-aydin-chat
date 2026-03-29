@@ -242,23 +242,30 @@ export function useChatSocket({
       } else if (clientMessageId) {
         Object.entries(prev).forEach(([currentPeerId, messages]) => {
           let peerChanged = false
+          const hasServerMessageAlready = messages.some((msg) => msg.id === messageId)
 
-          const updatedMessages = messages.map((msg) => {
+          const updatedMessages = messages.flatMap((msg) => {
             if (msg.id === clientMessageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
+              if (hasServerMessageAlready) {
+                peerChanged = true
+                changed = true
+                return []
+              }
+
               peerChanged = true
               changed = true
               serverMessagePeerRef.current[messageId] = currentPeerId
 
-              return {
+              return [{
                 ...msg,
                 id: messageId,
                 client_message_id: clientMessageId,
                 delivery_status: "delivered" as const,
                 error_message: undefined,
-              }
+              }]
             }
 
-            return msg
+            return [msg]
           })
 
           if (peerChanged) {
@@ -708,25 +715,32 @@ export function useChatSocket({
 
             Object.entries(prev).forEach(([peerId, messages]) => {
               let peerChanged = false
+              const hasServerMessageAlready = messages.some((msg) => msg.id === data.message_id)
 
-              const updatedMessages = messages.map((msg) => {
+              const updatedMessages = messages.flatMap((msg) => {
                 const matchesQueuedMessage = msg.id === data.client_message_id
                   || msg.client_message_id === data.client_message_id
 
                 if (!matchesQueuedMessage) {
-                  return msg
+                  return [msg]
+                }
+
+                if (hasServerMessageAlready) {
+                  peerChanged = true
+                  changed = true
+                  return []
                 }
 
                 peerChanged = true
                 changed = true
                 serverMessagePeerRef.current[data.message_id] = peerId
 
-                return {
+                return [{
                   ...msg,
                   id: data.message_id,
                   delivery_status: "sent" as const,
                   error_message: undefined,
-                }
+                }]
               })
 
               if (peerChanged) {
@@ -752,6 +766,8 @@ export function useChatSocket({
             return
           }
 
+          const normalizedQueuedGroupId = data.group_id.trim().toLowerCase()
+
           clearPendingSendTimeout(data.client_message_id)
           clearPendingRetryByClientMessageId(data.client_message_id)
 
@@ -761,27 +777,34 @@ export function useChatSocket({
 
             Object.entries(prev).forEach(([peerId, messages]) => {
               let peerChanged = false
+              const hasServerMessageAlready = messages.some((msg) => msg.id === data.message_id)
 
-              const updatedMessages = messages.map((msg) => {
+              const updatedMessages = messages.flatMap((msg) => {
                 const matchesQueuedMessage = msg.id === data.client_message_id
                   || msg.client_message_id === data.client_message_id
 
                 if (!matchesQueuedMessage) {
-                  return msg
+                  return [msg]
+                }
+
+                if (hasServerMessageAlready) {
+                  peerChanged = true
+                  changed = true
+                  return []
                 }
 
                 peerChanged = true
                 changed = true
                 serverMessagePeerRef.current[data.message_id] = peerId
 
-                return {
+                return [{
                   ...msg,
                   id: data.message_id,
-                  group_id: data.group_id,
-                  to_user_id: `group:${data.group_id}`,
+                  group_id: normalizedQueuedGroupId,
+                  to_user_id: `group:${normalizedQueuedGroupId}`,
                   delivery_status: "sent" as const,
                   error_message: undefined,
-                }
+                }]
               })
 
               if (peerChanged) {
