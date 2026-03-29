@@ -1,28 +1,27 @@
 ﻿import { useEffect, useMemo, useState } from "react"
 import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { normalizeIdentity } from "@/utils/identity"
+import { useAppSelector } from "@/store/hooks"
+import { selectAuthState, selectFriendshipState, selectGroupsState } from "@/store/selectors"
 
 type CreateGroupModalProps = {
   isOpen: boolean
-  friends: string[]
-  displayName: string
-  userId: string
-  loading: boolean
-  error: string | null
   onClose: () => void
   onSubmit: (name: string, memberUsernames: string[]) => Promise<boolean>
 }
 
 export function CreateGroupModal({
   isOpen,
-  friends,
-  displayName,
-  userId,
-  loading,
-  error,
   onClose,
   onSubmit,
 }: CreateGroupModalProps) {
+  const { authSession } = useAppSelector(selectAuthState)
+  const { friends } = useAppSelector(selectFriendshipState)
+  const { groupsLoading, groupsError } = useAppSelector(selectGroupsState)
+
+  const displayName = authSession?.username || authSession?.userId || ""
+  const userId = authSession?.userId || ""
+
   const [name, setName] = useState("")
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])
   const [localError, setLocalError] = useState<string | null>(null)
@@ -106,8 +105,8 @@ export function CreateGroupModal({
       panelClassName="max-w-xl"
       bodyClassName="space-y-3"
     >
-      {error ? (
-        <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{error}</p>
+      {groupsError ? (
+        <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{groupsError}</p>
       ) : null}
       {localError ? (
         <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{localError}</p>
@@ -184,13 +183,13 @@ export function CreateGroupModal({
           </button>
           <button
             type="button"
-            disabled={loading}
+            disabled={groupsLoading}
             onClick={() => {
               void onCreateClick()
             }}
             className="rounded-md bg-blue-600 px-3 py-1.5 font-semibold text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? "Creating..." : "Create Group"}
+            {groupsLoading ? "Creating..." : "Create Group"}
           </button>
         </div>
       </div>

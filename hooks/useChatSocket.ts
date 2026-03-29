@@ -1333,7 +1333,7 @@ export function useChatSocket({
       return
     }
 
-    const heartReaction = "â¤ï¸"
+    const heartReaction = "❤️"
     toggleLocalMessageReaction(normalizedMessageId, heartReaction, normalizedUserId)
     if (normalizedConversation.startsWith("group:")) {
       const groupId = normalizedConversation.slice("group:".length)

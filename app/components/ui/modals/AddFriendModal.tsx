@@ -1,19 +1,11 @@
 import { GenericModal } from "@/app/components/ui/modals/GenericModal"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectAuthState, selectFriendshipState } from "@/store/selectors"
+import { sendFriendRequestAction } from "@/store/features/friendshipSlice"
 
 type AddFriendModalProps = {
   isOpen: boolean
-  allUsers: string[]
-  friends: string[]
-  incomingRequests: string[]
-  outgoingRequests: string[]
-  displayName: string
-  userId: string
-  allUsersLoading: boolean
-  allUsersError: string | null
-  actionLoading: boolean
-  actionError: string | null
   onClose: () => void
-  onSendFriendRequest: (userId: string) => void
 }
 
 function normalizeIdentity(value: string) {
@@ -22,19 +14,25 @@ function normalizeIdentity(value: string) {
 
 export function AddFriendModal({
   isOpen,
-  allUsers,
-  friends,
-  incomingRequests,
-  outgoingRequests,
-  displayName,
-  userId,
-  allUsersLoading,
-  allUsersError,
-  actionLoading,
-  actionError,
   onClose,
-  onSendFriendRequest,
 }: AddFriendModalProps) {
+  const dispatch = useAppDispatch()
+  const { authSession } = useAppSelector(selectAuthState)
+  const {
+    allUsers,
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    allUsersLoading,
+    allUsersError,
+    friendActionLoading,
+    friendActionError,
+  } = useAppSelector(selectFriendshipState)
+
+  const displayName = authSession?.username || authSession?.userId || ""
+  const userId = authSession?.userId || ""
+  const token = authSession?.token || ""
+
   const normalizedDisplayName = normalizeIdentity(displayName)
   const normalizedUserId = normalizeIdentity(userId)
 
@@ -71,8 +69,8 @@ export function AddFriendModal({
     >
       {allUsersLoading && <p className="pt-2 text-sm text-gray-400">Loading users...</p>}
 
-      {!allUsersLoading && actionError && (
-        <p className="mb-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{actionError}</p>
+      {!allUsersLoading && friendActionError && (
+        <p className="mb-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{friendActionError}</p>
       )}
 
       {!allUsersLoading && allUsersError && (
@@ -100,8 +98,14 @@ export function AddFriendModal({
               ) : (
                 <button
                   type="button"
-                  disabled={actionLoading}
-                  onClick={() => onSendFriendRequest(candidate)}
+                  disabled={friendActionLoading}
+                  onClick={() => {
+                    if (!token) {
+                      return
+                    }
+
+                    void dispatch(sendFriendRequestAction({ token, friendId: candidate }))
+                  }}
                   className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-500"
                 >
                   Send Request

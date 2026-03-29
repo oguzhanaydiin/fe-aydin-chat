@@ -1,13 +1,17 @@
-﻿import { useCallback, useEffect, useRef, useState } from "react"
-import {
-  acceptFriendRequest,
-  fetchAllUsers,
-  fetchFriendSnapshot,
-  removeFriend,
-  sendFriendRequest,
-} from "@/utils/chatApi"
-import type { ConnectionStatus, FriendSnapshot } from "@/utils/chatTypes"
+import { useCallback, useEffect, useRef } from "react"
+import type { ConnectionStatus } from "@/utils/chatTypes"
 import { normalizeIdentity } from "@/utils/identity"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectFriendshipState } from "@/store/selectors"
+import {
+  acceptFriendRequestAction,
+  fetchAllUsersRequest,
+  fetchFriendSnapshotRequest,
+  removeFriendAction,
+  resetFriendshipState as resetFriendshipStateAction,
+  sendFriendRequestAction,
+  setAddUserModalOpen,
+} from "@/store/features/friendshipSlice"
 
 interface UseFriendshipOptions {
   token: string
@@ -30,24 +34,23 @@ export function useFriendship({
   setMessage,
   clearChat,
 }: UseFriendshipOptions) {
-  const [friends, setFriends] = useState<string[]>([])
-  const [incomingRequests, setIncomingRequests] = useState<string[]>([])
-  const [outgoingRequests, setOutgoingRequests] = useState<string[]>([])
-  const [friendActionLoading, setFriendActionLoading] = useState(false)
-  const [friendActionError, setFriendActionError] = useState<string | null>(null)
-  const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false)
-  const [allUsers, setAllUsers] = useState<string[]>([])
-  const [allUsersLoading, setAllUsersLoading] = useState(false)
-  const [allUsersError, setAllUsersError] = useState<string | null>(null)
+  const dispatch = useAppDispatch()
+  const {
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    friendActionLoading,
+    friendActionError,
+    isAddUserModalOpen,
+    allUsers,
+    allUsersLoading,
+    allUsersError,
+  } = useAppSelector(selectFriendshipState)
 
   const knownAcceptedFriendsRef = useRef<Set<string>>(new Set())
   const friendsInitializedRef = useRef(false)
 
-  const applyFriendSnapshot = useCallback((snapshot: FriendSnapshot) => {
-    const accepted = Array.from(new Set(snapshot.accepted_friends.map((item) => normalizeIdentity(item))))
-    const incoming = Array.from(new Set(snapshot.incoming_requests.map((item) => normalizeIdentity(item))))
-    const outgoing = Array.from(new Set(snapshot.outgoing_requests.map((item) => normalizeIdentity(item))))
-
+  const applyAcceptedFriendsEffects = useCallback((accepted: string[]) => {
     if (friendsInitializedRef.current) {
       const newlyAccepted = accepted.filter((friend) => !knownAcceptedFriendsRef.current.has(friend))
       if (newlyAccepted.length > 0) {
@@ -57,11 +60,11 @@ export function useFriendship({
 
     knownAcceptedFriendsRef.current = new Set(accepted)
     friendsInitializedRef.current = true
-
-    setFriends(accepted)
-    setIncomingRequests(incoming)
-    setOutgoingRequests(outgoing)
   }, [setTargetUser])
+
+  useEffect(() => {
+    applyAcceptedFriendsEffects(friends)
+  }, [applyAcceptedFriendsEffects, friends])
 
   useEffect(() => {
     let cancelled = false
@@ -69,9 +72,7 @@ export function useFriendship({
     if (!token || !userId) {
       queueMicrotask(() => {
         if (!cancelled) {
-          setFriends([])
-          setIncomingRequests([])
-          setOutgoingRequests([])
+          dispatch(resetFriendshipStateAction())
         }
       })
 
@@ -80,58 +81,32 @@ export function useFriendship({
       }
     }
 
-    void fetchFriendSnapshot(token)
-      .then((snapshot) => {
-        if (!cancelled) {
-          applyFriendSnapshot(snapshot)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setFriendActionError(err instanceof Error ? err.message : "Could not load friends")
-        }
-      })
+    void dispatch(fetchFriendSnapshotRequest(token))
 
     return () => {
       cancelled = true
     }
-  }, [applyFriendSnapshot, token, userId])
+  }, [dispatch, token, userId])
 
   useEffect(() => {
     if (wsStatus !== "open" || !token) {
       return
     }
 
-    void fetchFriendSnapshot(token)
-      .then((snapshot) => applyFriendSnapshot(snapshot))
-      .catch(() => { })
-  }, [wsStatus, applyFriendSnapshot, token])
+    void dispatch(fetchFriendSnapshotRequest(token))
+  }, [dispatch, wsStatus, token])
 
   const onOpenAddUserModal = async () => {
     if (!token) {
       return
     }
 
-    setIsAddUserModalOpen(true)
-    setAllUsersLoading(true)
-    setAllUsersError(null)
-
-    try {
-      const users = await fetchAllUsers(token)
-      const normalizedSelf = normalizeIdentity(displayName || userId)
-      const deduped = Array.from(new Set(users))
-      const filtered = deduped.filter((candidate) => normalizeIdentity(candidate) !== normalizedSelf)
-      setAllUsers(filtered)
-    } catch (err) {
-      setAllUsers([])
-      setAllUsersError(err instanceof Error ? err.message : "Could not load users")
-    } finally {
-      setAllUsersLoading(false)
-    }
+    dispatch(setAddUserModalOpen(true))
+    await dispatch(fetchAllUsersRequest({ token, userId, displayName }))
   }
 
   const onCloseAddUserModal = () => {
-    setIsAddUserModalOpen(false)
+    dispatch(setAddUserModalOpen(false))
   }
 
   const onSendFriendRequest = async (friendId: string) => {
@@ -150,19 +125,7 @@ export function useFriendship({
       return
     }
 
-    setFriendActionLoading(true)
-    setFriendActionError(null)
-
-    try {
-      await sendFriendRequest(token, candidate)
-      const snapshot = await fetchFriendSnapshot(token)
-      applyFriendSnapshot(snapshot)
-      setIsAddUserModalOpen(false)
-    } catch (err) {
-      setFriendActionError(err instanceof Error ? err.message : "Could not send friend request")
-    } finally {
-      setFriendActionLoading(false)
-    }
+    await dispatch(sendFriendRequestAction({ token, friendId: candidate }))
   }
 
   const onAcceptFriendRequest = async (fromUsername: string) => {
@@ -175,19 +138,9 @@ export function useFriendship({
       return
     }
 
-    setFriendActionLoading(true)
-    setFriendActionError(null)
-
-    try {
-      await acceptFriendRequest(token, normalized)
-
-      const snapshot = await fetchFriendSnapshot(token)
-      applyFriendSnapshot(snapshot)
+    const action = await dispatch(acceptFriendRequestAction({ token, fromUsername: normalized }))
+    if (acceptFriendRequestAction.fulfilled.match(action)) {
       setTargetUser(normalized)
-    } catch (err) {
-      setFriendActionError(err instanceof Error ? err.message : "Could not accept friend request")
-    } finally {
-      setFriendActionLoading(false)
     }
   }
 
@@ -201,44 +154,22 @@ export function useFriendship({
       return
     }
 
-    setFriendActionLoading(true)
-    setFriendActionError(null)
-
-    try {
-      await removeFriend(token, normalized)
-
+    const action = await dispatch(removeFriendAction({ token, friendUsername: normalized }))
+    if (removeFriendAction.fulfilled.match(action)) {
       clearChat(normalized)
-      setFriends((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
-      setIncomingRequests((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
-      setOutgoingRequests((prev) => prev.filter((item) => normalizeIdentity(item) !== normalized))
 
       if (targetUser && normalizeIdentity(targetUser) === normalized) {
         setTargetUser(null)
         setMessage("")
       }
-
-      const snapshot = await fetchFriendSnapshot(token)
-      applyFriendSnapshot(snapshot)
-    } catch (err) {
-      setFriendActionError(err instanceof Error ? err.message : "Could not remove friend")
-    } finally {
-      setFriendActionLoading(false)
     }
   }
 
   const resetFriendshipState = useCallback(() => {
-    setFriends([])
-    setIncomingRequests([])
-    setOutgoingRequests([])
+    dispatch(resetFriendshipStateAction())
     knownAcceptedFriendsRef.current = new Set()
     friendsInitializedRef.current = false
-    setFriendActionLoading(false)
-    setFriendActionError(null)
-    setIsAddUserModalOpen(false)
-    setAllUsers([])
-    setAllUsersLoading(false)
-    setAllUsersError(null)
-  }, [])
+  }, [dispatch])
 
   return {
     friends,
