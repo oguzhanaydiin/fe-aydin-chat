@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
-import { requestOtp, saveUsername, updateProfile, verifyOtp } from "@/lib/chat/authApi"
-import { SESSION_STORAGE_KEY } from "@/lib/chat/constants"
+﻿import { useEffect, useState } from "react"
+import { requestOtp, saveUsername, updateProfile, verifyOtp } from "@/utils/chatApi"
+import { SESSION_STORAGE_KEY } from "@/utils/chatConfig"
 
 export type AuthSession = {
   token: string

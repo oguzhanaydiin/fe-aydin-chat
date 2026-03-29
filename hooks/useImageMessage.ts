@@ -1,5 +1,5 @@
-import { useCallback } from "react"
-import { BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH } from "@/lib/chat/constants"
+﻿import { useCallback } from "react"
+import { BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH } from "@/utils/chatConfig"
 
 interface UseImageMessageOptions {
   targetConversation: string | null

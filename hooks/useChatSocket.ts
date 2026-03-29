@@ -1,7 +1,7 @@
-"use client"
+﻿"use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/lib/chat/types"
+import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/utils/chatTypes"
 
 interface UseChatSocketOptions {
   userId: string
@@ -1333,7 +1333,7 @@ export function useChatSocket({
       return
     }
 
-    const heartReaction = "❤️"
+    const heartReaction = "â¤ï¸"
     toggleLocalMessageReaction(normalizedMessageId, heartReaction, normalizedUserId)
     if (normalizedConversation.startsWith("group:")) {
       const groupId = normalizedConversation.slice("group:".length)

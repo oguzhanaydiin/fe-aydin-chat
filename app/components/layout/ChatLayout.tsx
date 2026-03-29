@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+﻿import { useEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, FormEvent, RefObject } from "react"
 import Image from "next/image"
-import type { ChatMessage, GroupDetail, GroupSummary } from "@/lib/chat/types"
-import { AddFriendModal } from "@/app/components/chat/AddFriendModal"
-import { ConfirmModal } from "@/app/components/chat/ConfirmModal"
-import { CreateGroupModal } from "@/app/components/chat/CreateGroupModal"
-import { FriendListModal } from "@/app/components/chat/FriendListModal"
-import { GroupMembersModal } from "@/app/components/chat/GroupMembersModal"
-import { OwnProfileModal, PeerProfileModal } from "@/app/components/chat/ProfileModal"
+import type { ChatMessage, GroupDetail, GroupSummary } from "@/utils/chatTypes"
+import { AddFriendModal } from "@/app/components/ui/modals/AddFriendModal"
+import { ConfirmModal } from "@/app/components/ui/modals/ConfirmModal"
+import { CreateGroupModal } from "@/app/components/ui/modals/CreateGroupModal"
+import { FriendListModal } from "@/app/components/ui/modals/FriendListModal"
+import { GroupMembersModal } from "@/app/components/ui/modals/GroupMembersModal"
+import { OwnProfileModal, PeerProfileModal } from "@/app/components/ui/modals/ProfileModal"
+import { AccordionSection } from "@/app/components/ui/AccordionSection"
 
 type MessageGroup = {
   fromUserId: string
@@ -191,6 +192,8 @@ export function ChatLayout({
   const [isOwnProfileOpen, setIsOwnProfileOpen] = useState(false)
   const [peerProfileUsername, setPeerProfileUsername] = useState<string | null>(null)
   const [isSearchOpen, setIsSearchOpen] = useState(false)
+  const [isDirectMessagesOpen, setIsDirectMessagesOpen] = useState(true)
+  const [isGroupsOpen, setIsGroupsOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1)
   const normalizedDisplayName = displayName.trim().toLowerCase()
@@ -395,7 +398,7 @@ export function ChatLayout({
     <div className="flex h-screen bg-gray-900 text-white font-sans">
       <div className="w-1/4 border-r border-gray-700 p-4 overflow-y-auto bg-gray-800 flex flex-col">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-xl font-bold text-blue-400">Friends</h2>
+          <h2 className="text-xl font-bold text-blue-400">Aydin Chat</h2>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -413,56 +416,74 @@ export function ChatLayout({
             </button>
           </div>
         </div>
-        <div className="space-y-2 flex-1">
-          {visibleFriends.length === 0 && <p className="text-gray-500 text-sm">No friends added yet.</p>}
-          {visibleFriends.map((u) => (
-            <div
-              key={u}
-              className={`relative flex items-center gap-2 rounded-lg p-2 transition ${
-                targetUser === u
-                  ? "bg-slate-600/45 border border-slate-400/45 shadow-sm"
-                  : "bg-slate-700/35 border border-slate-500/35 hover:bg-slate-600/40"
-              }`}
-            >
-              {(() => {
-                const unreadCount = unreadCountsByPeer[u] ?? unreadCountsByPeer[u.trim().toLowerCase()] ?? 0
-                if (unreadCount <= 0) {
-                  return null
-                }
-
-                return (
-                  <span className="absolute -top-2 -right-2 min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
-                    {unreadCount}
-                  </span>
-                )
-              })()}
-              <button
-                type="button"
-                onClick={() => onStartChat(u)}
-                className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        <div className="space-y-3 flex-1">
+          <AccordionSection
+            title="Direct Messages"
+            isOpen={isDirectMessagesOpen}
+            onToggle={() => setIsDirectMessagesOpen((prev) => !prev)}
+            className="rounded-lg border border-slate-600/40 bg-slate-900/30"
+            headerClassName="flex items-center justify-between gap-2 px-3 py-2"
+            titleClassName="text-xs font-semibold uppercase tracking-wide text-blue-300"
+            contentClassName="space-y-2 px-2 pb-2"
+            toggleAriaLabel={isDirectMessagesOpen ? "Collapse direct messages" : "Expand direct messages"}
+          >
+            {visibleFriends.length === 0 && <p className="px-1 text-gray-500 text-sm">No friends added yet.</p>}
+            {visibleFriends.map((u) => (
+              <div
+                key={u}
+                className={`relative flex items-center gap-2 rounded-lg p-2 transition ${
+                  targetUser === u
+                    ? "bg-slate-600/45 border border-slate-400/45 shadow-sm"
+                    : "bg-slate-700/35 border border-slate-500/35 hover:bg-slate-600/40"
+                }`}
               >
-                <div
-                  className={`h-3 w-3 rounded-full ${
-                    onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500"
-                  }`}
-                ></div>
-                <span className="truncate">{u}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={`Remove ${u}`}
-                title={`Remove ${u}`}
-                onClick={() => onRequestRemoveFriend(u)}
-                className="rounded-md px-2 py-1 text-xs font-bold text-gray-200 transition hover:bg-black/20 hover:text-white"
-              >
-                x
-              </button>
-            </div>
-          ))}
+                {(() => {
+                  const unreadCount = unreadCountsByPeer[u] ?? unreadCountsByPeer[u.trim().toLowerCase()] ?? 0
+                  if (unreadCount <= 0) {
+                    return null
+                  }
 
-          <div className="mt-4 border-t border-gray-700 pt-4">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-teal-300">Groups</p>
+                  return (
+                    <span className="absolute -top-2 -right-2 min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[10px] font-bold leading-none text-white">
+                      {unreadCount}
+                    </span>
+                  )
+                })()}
+                <button
+                  type="button"
+                  onClick={() => onStartChat(u)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  <div
+                    className={`h-3 w-3 rounded-full ${
+                      onlineUsersSet.has(u.trim().toLowerCase()) ? "bg-green-500" : "bg-gray-500"
+                    }`}
+                  ></div>
+                  <span className="truncate">{u}</span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Remove ${u}`}
+                  title={`Remove ${u}`}
+                  onClick={() => onRequestRemoveFriend(u)}
+                  className="rounded-md px-2 py-1 text-xs font-bold text-gray-200 transition hover:bg-black/20 hover:text-white"
+                >
+                  x
+                </button>
+              </div>
+            ))}
+          </AccordionSection>
+
+          <AccordionSection
+            title="Groups"
+            isOpen={isGroupsOpen}
+            onToggle={() => setIsGroupsOpen((prev) => !prev)}
+            className="rounded-lg border border-teal-700/35 bg-teal-950/10"
+            headerClassName="flex items-center justify-between gap-2 px-3 py-2"
+            titleClassName="text-xs font-semibold uppercase tracking-wide text-teal-300"
+            contentClassName="space-y-2 px-2 pb-2"
+            toggleAriaLabel={isGroupsOpen ? "Collapse groups" : "Expand groups"}
+            headerActions={(
               <button
                 type="button"
                 onClick={() => setIsCreateGroupModalOpen(true)}
@@ -470,29 +491,28 @@ export function ChatLayout({
               >
                 New Group
               </button>
-            </div>
-            <div className="space-y-2">
-              {groups.length === 0 ? <p className="text-gray-500 text-sm">No groups yet.</p> : null}
-              {groups.map((group) => (
-                <button
-                  key={group.group_id}
-                  type="button"
-                  onClick={() => onStartGroupChat(group.group_id)}
-                  className={`w-full rounded-lg border p-2 text-left transition ${
-                    selectedGroupId === group.group_id
-                      ? "border-teal-400/50 bg-teal-800/30"
-                      : "border-slate-500/35 bg-slate-700/25 hover:bg-slate-600/30"
-                  }`}
-                >
-                  <span className="block truncate text-sm font-semibold text-teal-100">{group.name}</span>
-                  <p className="mt-0.5 text-[11px] text-teal-200/70">Group chat • {group.member_count} members</p>
-                </button>
-              ))}
-            </div>
+            )}
+          >
+            {groups.length === 0 ? <p className="px-1 text-gray-500 text-sm">No groups yet.</p> : null}
+            {groups.map((group) => (
+              <button
+                key={group.group_id}
+                type="button"
+                onClick={() => onStartGroupChat(group.group_id)}
+                className={`w-full rounded-lg border p-2 text-left transition ${
+                  selectedGroupId === group.group_id
+                    ? "border-teal-400/50 bg-teal-800/30"
+                    : "border-slate-500/35 bg-slate-700/25 hover:bg-slate-600/30"
+                }`}
+              >
+                <span className="block truncate text-sm font-semibold text-teal-100">{group.name}</span>
+                <p className="mt-0.5 text-[11px] text-teal-200/70">Group chat {"\u2022"} {group.member_count} members</p>
+              </button>
+            ))}
             {groupsError ? (
               <p className="mt-2 rounded-md border border-red-900 bg-red-950 px-2 py-1.5 text-xs text-red-300">{groupsError}</p>
             ) : null}
-          </div>
+          </AccordionSection>
 
           {incomingRequests.length > 0 && (
             <div className="mt-4 rounded-lg border border-amber-700/40 bg-amber-950/20 p-3">
@@ -751,7 +771,7 @@ export function ChatLayout({
                         aria-label="Previous search result"
                         title="Previous"
                       >
-                        ↑
+                        â†‘
                       </button>
                       <button
                         type="button"
@@ -761,7 +781,7 @@ export function ChatLayout({
                         aria-label="Next search result"
                         title="Next"
                       >
-                        ↓
+                        â†“
                       </button>
                       <button
                         type="button"
@@ -895,7 +915,7 @@ export function ChatLayout({
                     )}
                     <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
                       {group.messages.map((messagePart) => {
-                        const heartUsers = messagePart.reactions?.["❤️"] ?? []
+                        const heartUsers = messagePart.reactions?.["â¤ï¸"] ?? []
                         if (heartUsers.length === 0) {
                           return null
                         }
@@ -958,7 +978,7 @@ export function ChatLayout({
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-500">
             <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mb-4">
-              <span className="text-2xl">👋</span>
+              <span className="text-2xl">{"\u{1F44B}"}</span>
             </div>
             <p>Select a friend or a group from the left to start chatting.</p>
           </div>

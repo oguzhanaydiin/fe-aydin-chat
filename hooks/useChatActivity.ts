@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react"
-import type { ChatMessage, ConnectionStatus } from "@/lib/chat/types"
-import { normalizeIdentity } from "@/lib/chat/utils"
+﻿import { useCallback, useEffect, useRef, useState } from "react"
+import type { ChatMessage, ConnectionStatus } from "@/utils/chatTypes"
+import { normalizeIdentity } from "@/utils/identity"
 
 interface UseChatActivityOptions {
   messagesByPeer: Record<string, ChatMessage[]>

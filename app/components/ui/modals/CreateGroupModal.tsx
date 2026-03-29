@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
-import { GenericModal } from "@/app/components/chat/GenericModal"
-import { normalizeIdentity } from "@/lib/chat/utils"
+﻿import { useEffect, useMemo, useState } from "react"
+import { GenericModal } from "@/app/components/ui/modals/GenericModal"
+import { normalizeIdentity } from "@/utils/identity"
 
 type CreateGroupModalProps = {
   isOpen: boolean
