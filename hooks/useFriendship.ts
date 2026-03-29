@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react"
 import type { ConnectionStatus } from "@/utils/chatTypes"
 import { normalizeIdentity } from "@/utils/identity"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectFriendshipState } from "@/store/selectors"
 import {
   acceptFriendRequestAction,
   fetchAllUsersRequest,
@@ -44,7 +45,7 @@ export function useFriendship({
     allUsers,
     allUsersLoading,
     allUsersError,
-  } = useAppSelector((state) => state.friendship)
+  } = useAppSelector(selectFriendshipState)
 
   const knownAcceptedFriendsRef = useRef<Set<string>>(new Set())
   const friendsInitializedRef = useRef(false)

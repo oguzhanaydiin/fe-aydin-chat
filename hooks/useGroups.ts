@@ -2,6 +2,7 @@
 import { fetchGroupDetail } from "@/utils/chatApi"
 import type { GroupDetail } from "@/utils/chatTypes"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectGroupsState } from "@/store/selectors"
 import {
   addGroupMemberAction,
   createGroupAction,
@@ -19,7 +20,7 @@ interface UseGroupsOptions {
 
 export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
   const dispatch = useAppDispatch()
-  const { groups, groupsLoading, groupsError } = useAppSelector((state) => state.groups)
+  const { groups, groupsLoading, groupsError } = useAppSelector(selectGroupsState)
 
   const reloadGroups = useCallback(async () => {
     if (!token || !isAuthenticated) {

@@ -2,11 +2,12 @@
 import { useCallback, useEffect, useRef } from "react"
 import { useChatSocket } from "@/hooks/useChatSocket"
 import { useAuthFlow } from "@/hooks/useAuthFlow"
-import { useFriendship } from "../hooks/useFriendship"
+import { useFriendship } from "@/hooks/useFriendship"
 import { useGroups } from "@/hooks/useGroups"
 import { useImageMessage } from "@/hooks/useImageMessage"
 import { useChatActivity } from "@/hooks/useChatActivity"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectChatUiState } from "@/store/selectors"
 import {
   resetChatUi,
   setMessage as setMessageAction,
@@ -23,8 +24,7 @@ import { ChatLayout } from "@/app/components/layout/ChatLayout"
 export default function ChatPage() {
   const maxWsTextLength = resolveMaxWsTextLength()
   const dispatch = useAppDispatch()
-  const targetUser = useAppSelector((state) => state.chatUi.targetUser)
-  const message = useAppSelector((state) => state.chatUi.message)
+  const { targetUser, message } = useAppSelector(selectChatUiState)
 
   const {
     authSession,

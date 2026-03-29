@@ -1,5 +1,6 @@
 ﻿import { useCallback, useEffect } from "react"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectAuthState } from "@/store/selectors"
 import {
   clearAuthState,
   hydrateAuthSession,
@@ -30,7 +31,7 @@ export function useAuthFlow() {
     profileLoading,
     profileError,
     hydrationComplete,
-  } = useAppSelector((state) => state.auth)
+  } = useAppSelector(selectAuthState)
 
   useEffect(() => {
     if (hydrationComplete) {
