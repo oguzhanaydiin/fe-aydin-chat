@@ -4,6 +4,9 @@ import Image from "next/image"
 import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { getUserProfile } from "@/utils/chatApi"
 import type { PublicProfile } from "@/utils/chatTypes"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectAuthState } from "@/store/selectors"
+import { updateProfileRequest } from "@/store/features/authSlice"
 
 const MAX_AVATAR_BYTES = 512 * 1024 // 512 KB
 
@@ -78,29 +81,23 @@ function AvatarPlaceholder({ username }: { username: string }) {
   )
 }
 
-// â”€â”€â”€ Own profile (editable) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Own profile (editable)
 
 type OwnProfileModalProps = {
   isOpen: boolean
-  username: string
-  email: string
-  avatarDataUrl?: string | null
-  loading?: boolean
-  error?: string | null
   onClose: () => void
-  onSave: (avatarDataUrl: string | null) => void
 }
 
 export function OwnProfileModal({
   isOpen,
-  username,
-  email,
-  avatarDataUrl: initialAvatarDataUrl,
-  loading,
-  error,
   onClose,
-  onSave,
 }: OwnProfileModalProps) {
+  const dispatch = useAppDispatch()
+  const { authSession, profileLoading, profileError } = useAppSelector(selectAuthState)
+  const username = authSession?.username || authSession?.userId || ""
+  const email = authSession?.email || ""
+  const initialAvatarDataUrl = authSession?.avatar_data_url ?? null
+
   const [avatarDataUrl, setAvatarDataUrl] = useState<string | null>(initialAvatarDataUrl ?? null)
   const [avatarError, setAvatarError] = useState<string | null>(null)
   const [avatarLoading, setAvatarLoading] = useState(false)
@@ -148,7 +145,7 @@ export function OwnProfileModal({
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    onSave(avatarDataUrl)
+    void dispatch(updateProfileRequest(avatarDataUrl))
   }
 
   return (
@@ -175,7 +172,7 @@ export function OwnProfileModal({
             title="Change avatar"
             disabled={avatarLoading}
           >
-            âœ
+            Edit
           </button>
         </div>
         <input
@@ -217,18 +214,18 @@ export function OwnProfileModal({
             />
           </div>
 
-          {error && (
+          {profileError && (
             <p className="text-xs text-red-300 rounded-md border border-red-900 bg-red-950 px-2 py-1.5">
-              {error}
+              {profileError}
             </p>
           )}
 
           <button
             type="submit"
-            disabled={loading || avatarLoading}
+            disabled={profileLoading || avatarLoading}
             className="w-full rounded-lg bg-blue-600 py-2 text-sm font-semibold hover:bg-blue-500 disabled:opacity-60"
           >
-            {loading ? "Saving..." : "Save Profile"}
+            {profileLoading ? "Saving..." : "Save Profile"}
           </button>
         </form>
       </div>
@@ -236,7 +233,7 @@ export function OwnProfileModal({
   )
 }
 
-// â”€â”€â”€ Peer profile (read-only, fetched on open) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Peer profile (read-only, fetched on open)
 
 type PeerProfileModalProps = {
   isOpen: boolean

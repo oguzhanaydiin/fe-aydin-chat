@@ -1,14 +1,12 @@
 import { GenericModal } from "@/app/components/ui/modals/GenericModal"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectAuthState, selectChatUiState, selectFriendshipState } from "@/store/selectors"
+import { setTargetUser } from "@/store/features/chatUiSlice"
 
 type FriendListModalProps = {
   isOpen: boolean
-  friends: string[]
   onlineUsers: string[]
-  displayName: string
-  userId: string
-  targetUser: string | null
   onClose: () => void
-  onStartChat: (otherId: string) => void
 }
 
 function normalizeIdentity(value: string) {
@@ -17,14 +15,16 @@ function normalizeIdentity(value: string) {
 
 export function FriendListModal({
   isOpen,
-  friends,
   onlineUsers,
-  displayName,
-  userId,
-  targetUser,
   onClose,
-  onStartChat,
 }: FriendListModalProps) {
+  const dispatch = useAppDispatch()
+  const { authSession } = useAppSelector(selectAuthState)
+  const { friends } = useAppSelector(selectFriendshipState)
+  const { targetUser } = useAppSelector(selectChatUiState)
+
+  const displayName = authSession?.username || authSession?.userId || ""
+  const userId = authSession?.userId || ""
   const normalizedDisplayName = normalizeIdentity(displayName)
   const normalizedUserId = normalizeIdentity(userId)
   const onlineUsersSet = new Set(onlineUsers.map((candidate) => normalizeIdentity(candidate)))
@@ -69,7 +69,7 @@ export function FriendListModal({
                 <button
                   type="button"
                   onClick={() => {
-                    onStartChat(friend)
+                    dispatch(setTargetUser(friend))
                     onClose()
                   }}
                   className="rounded-md bg-blue-600 px-2 py-1 text-xs font-semibold text-white hover:bg-blue-500"

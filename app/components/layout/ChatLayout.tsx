@@ -1,7 +1,17 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react"
-import type { ChangeEvent, FormEvent, RefObject } from "react"
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import type { ChangeEvent, FormEvent } from "react"
 import Image from "next/image"
-import type { ChatMessage, GroupDetail, GroupSummary } from "@/utils/chatTypes"
+import type { ChatMessage, GroupDetail } from "@/utils/chatTypes"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import { selectAuthState, selectChatUiState, selectFriendshipState, selectGroupsState } from "@/store/selectors"
+import { setMessage as setMessageAction, setTargetUser as setTargetUserAction, resetChatUi } from "@/store/features/chatUiSlice"
+import { clearAuthState } from "@/store/features/authSlice"
+import { useChatSocket } from "@/hooks/useChatSocket"
+import { useFriendship } from "@/hooks/useFriendship"
+import { useGroups } from "@/hooks/useGroups"
+import { useChatActivity } from "@/hooks/useChatActivity"
+import { useImageMessage } from "@/hooks/useImageMessage"
+import { WS_URL, resolveMaxWsTextLength } from "@/utils/chatConfig"
 import { AddFriendModal } from "@/app/components/ui/modals/AddFriendModal"
 import { ConfirmModal } from "@/app/components/ui/modals/ConfirmModal"
 import { CreateGroupModal } from "@/app/components/ui/modals/CreateGroupModal"
@@ -22,54 +32,6 @@ type MessageGroup = {
     deliveryStatus?: "sending" | "sent" | "delivered" | "failed"
     errorMessage?: string
   }>
-}
-
-type ChatLayoutProps = {
-  friends: string[]
-  incomingRequests: string[]
-  outgoingRequests: string[]
-  onlineUsers: string[]
-  targetUser: string | null
-  displayName: string
-  userId: string
-  token: string
-  ownAvatarDataUrl?: string | null
-  ownEmail?: string
-  profileLoading?: boolean
-  profileError?: string | null
-  message: string
-  currentMessages: ChatMessage[]
-  isAddUserModalOpen: boolean
-  allUsers: string[]
-  allUsersLoading: boolean
-  allUsersError: string | null
-  friendActionLoading: boolean
-  friendActionError: string | null
-  unreadCountsByPeer: Record<string, number>
-  messagesEndRef: RefObject<HTMLDivElement | null>
-  onStartChat: (otherId: string) => void
-  onOpenAddUserModal: () => void
-  groups: GroupSummary[]
-  groupsError: string | null
-  onStartGroupChat: (groupId: string) => void
-  onCreateGroup: (name: string, memberUsernames: string[]) => Promise<boolean>
-  onGetGroupDetail: (groupId: string) => Promise<GroupDetail | null>
-  onAddGroupMember: (groupId: string, username: string) => Promise<boolean>
-  onGrantInvitePermission: (groupId: string, username: string) => Promise<boolean>
-  onPromoteLeader: (groupId: string, username: string) => Promise<boolean>
-  onCloseAddUserModal: () => void
-  onSendFriendRequest: (userId: string) => void
-  onAcceptFriendRequest: (userId: string) => void
-  onRemoveFriend: (userId: string) => void
-  onClearChat: () => void
-  onLogout: () => void
-  onMessageChange: (value: string) => void
-  onSendMessage: (e: FormEvent) => void
-  onHeartMessage: (toUserId: string, messageId: string) => void
-  onRetryMessage: (messageId: string) => boolean
-  onDeleteMessage: (messageId: string) => boolean
-  onSendImage: (file: File) => void | Promise<void>
-  onSaveProfile: (avatarDataUrl: string | null) => void
 }
 
 function renderOutgoingStatusTick(status?: "sending" | "sent" | "delivered" | "failed") {
@@ -130,53 +92,106 @@ function groupMessages(currentMessages: ChatMessage[]) {
   }, [])
 }
 
-export function ChatLayout({
-  friends,
-  incomingRequests,
-  outgoingRequests,
-  onlineUsers,
-  targetUser,
-  displayName,
-  userId,
-  token,
-  ownAvatarDataUrl,
-  ownEmail,
-  profileLoading,
-  profileError,
-  message,
-  currentMessages,
-  isAddUserModalOpen,
-  allUsers,
-  allUsersLoading,
-  allUsersError,
-  friendActionLoading,
-  friendActionError,
-  unreadCountsByPeer,
-  messagesEndRef,
-  onStartChat,
-  onOpenAddUserModal,
-  groups,
-  groupsError,
-  onStartGroupChat,
-  onCreateGroup,
-  onGetGroupDetail,
-  onAddGroupMember,
-  onGrantInvitePermission,
-  onPromoteLeader,
-  onCloseAddUserModal,
-  onSendFriendRequest,
-  onAcceptFriendRequest,
-  onRemoveFriend,
-  onClearChat,
-  onLogout,
-  onMessageChange,
-  onSendMessage,
-  onHeartMessage,
-  onRetryMessage,
-  onDeleteMessage,
-  onSendImage,
-  onSaveProfile,
-}: ChatLayoutProps) {
+export function ChatLayout() {
+  const maxWsTextLength = resolveMaxWsTextLength()
+  const dispatch = useAppDispatch()
+  const { authSession } = useAppSelector(selectAuthState)
+  const { targetUser, message } = useAppSelector(selectChatUiState)
+  const userId = authSession?.userId || ""
+  const token = authSession?.token || ""
+  const displayName = authSession?.username || authSession?.userId || ""
+  const ownAvatarDataUrl = authSession?.avatar_data_url
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null)
+
+  const {
+    onlineUsers,
+    messagesByPeer,
+    sendMessage: sendChatMessage,
+    sendImageMessage,
+    sendGroupMessage,
+    sendGroupImageMessage,
+    retryMessage,
+    deleteMessage,
+    sendHeartMessage,
+    clearChat,
+    status: wsStatus,
+  } = useChatSocket({
+    userId,
+    token,
+    wsUrl: WS_URL,
+  })
+
+  const setTargetUser = useCallback((value: string | null) => {
+    dispatch(setTargetUserAction(value))
+  }, [dispatch])
+
+  const setMessage = useCallback((value: string) => {
+    dispatch(setMessageAction(value))
+  }, [dispatch])
+
+  const {
+    onOpenAddUserModal,
+    onCloseAddUserModal,
+    onAcceptFriendRequest,
+    onRemoveFriend,
+    resetFriendshipState,
+  } = useFriendship({
+    token,
+    userId,
+    displayName,
+    wsStatus,
+    targetUser,
+    setTargetUser,
+    setMessage,
+    clearChat,
+  })
+
+  const {
+    onCreateGroup,
+    onGetGroupDetail,
+    onAddGroupMember,
+    onGrantInvitePermission,
+    onPromoteGroupLeader,
+    resetGroupsState,
+  } = useGroups({
+    token,
+    isAuthenticated: Boolean(authSession),
+  })
+
+  const { unreadCountsByPeer, resetChatActivityState } = useChatActivity({
+    messagesByPeer,
+    userId,
+    targetUser,
+    wsStatus,
+    isAuthenticated: Boolean(authSession),
+  })
+
+  const { onSendImage } = useImageMessage({
+    targetConversation: targetUser,
+    userId,
+    sendImageMessage,
+    sendGroupImageMessage,
+  })
+
+  const currentMessages = useMemo(() => {
+    return targetUser ? messagesByPeer[targetUser] || [] : []
+  }, [messagesByPeer, targetUser])
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messagesByPeer, targetUser])
+
+  const {
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    isAddUserModalOpen,
+    friendActionLoading,
+    friendActionError,
+  } = useAppSelector(selectFriendshipState)
+  const { groups, groupsError } = useAppSelector(selectGroupsState)
+
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -184,7 +199,6 @@ export function ChatLayout({
   const [friendToRemove, setFriendToRemove] = useState<string | null>(null)
   const [isFriendListModalOpen, setIsFriendListModalOpen] = useState(false)
   const [isCreateGroupModalOpen, setIsCreateGroupModalOpen] = useState(false)
-  const [createGroupLoading, setCreateGroupLoading] = useState(false)
   const [isGroupMembersModalOpen, setIsGroupMembersModalOpen] = useState(false)
   const [groupMembersDetail, setGroupMembersDetail] = useState<GroupDetail | null>(null)
   const [groupMembersLoading, setGroupMembersLoading] = useState(false)
@@ -320,6 +334,68 @@ export function ChatLayout({
 
   const onImagePickerClick = () => {
     imageInputRef.current?.click()
+  }
+
+  const onStartChat = (otherId: string) => {
+    dispatch(setTargetUserAction(otherId))
+  }
+
+  const onStartGroupChat = (groupId: string) => {
+    dispatch(setTargetUserAction(`group:${groupId}`))
+  }
+
+  const onMessageChange = (value: string) => {
+    dispatch(setMessageAction(value))
+  }
+
+  const onClearChat = () => {
+    if (!targetUser) {
+      return
+    }
+
+    clearChat(targetUser)
+  }
+
+  const onSendMessage = (e: FormEvent) => {
+    e.preventDefault()
+    const trimmed = message.trim()
+    if (trimmed && targetUser && userId) {
+      if (trimmed.length > maxWsTextLength) {
+        window.alert(`Message is too long. Max ${maxWsTextLength} characters.`)
+        return
+      }
+
+      if (targetUser.startsWith("group:")) {
+        const groupId = targetUser.slice("group:".length)
+        if (!groupId) {
+          return
+        }
+
+        sendGroupMessage(groupId, trimmed)
+      } else {
+        sendChatMessage(targetUser, trimmed)
+      }
+
+      onMessageChange("")
+    }
+  }
+
+  const onLogout = () => {
+    dispatch(clearAuthState())
+    dispatch(resetChatUi())
+    resetFriendshipState()
+    resetGroupsState()
+    resetChatActivityState()
+  }
+
+  const onCreateGroupClick = async (name: string, memberUsernames: string[]) => {
+    const createdGroupId = await onCreateGroup(name, memberUsernames)
+    if (!createdGroupId) {
+      return false
+    }
+
+    onStartGroupChat(createdGroupId)
+    return true
   }
 
   const onImageInputChange = (event: ChangeEvent<HTMLInputElement>) => {
@@ -586,13 +662,7 @@ export function ChatLayout({
 
       <OwnProfileModal
         isOpen={isOwnProfileOpen}
-        username={displayName}
-        email={ownEmail ?? ""}
-        avatarDataUrl={ownAvatarDataUrl}
-        loading={profileLoading}
-        error={profileError}
         onClose={() => setIsOwnProfileOpen(false)}
-        onSave={onSaveProfile}
       />
 
       <PeerProfileModal
@@ -604,36 +674,13 @@ export function ChatLayout({
 
       <AddFriendModal
         isOpen={isAddUserModalOpen}
-        allUsers={allUsers}
-        friends={friends}
-        incomingRequests={incomingRequests}
-        outgoingRequests={outgoingRequests}
-        displayName={displayName}
-        userId={userId}
-        allUsersLoading={allUsersLoading}
-        allUsersError={allUsersError}
-        actionLoading={friendActionLoading}
-        actionError={friendActionError}
         onClose={onCloseAddUserModal}
-        onSendFriendRequest={onSendFriendRequest}
       />
 
       <CreateGroupModal
         isOpen={isCreateGroupModalOpen}
-        friends={friends}
-        displayName={displayName}
-        userId={userId}
-        loading={createGroupLoading}
-        error={groupsError}
         onClose={() => setIsCreateGroupModalOpen(false)}
-        onSubmit={async (name, memberUsernames) => {
-          setCreateGroupLoading(true)
-          try {
-            return await onCreateGroup(name, memberUsernames)
-          } finally {
-            setCreateGroupLoading(false)
-          }
-        }}
+        onSubmit={onCreateGroupClick}
       />
 
       <GroupMembersModal
@@ -674,7 +721,7 @@ export function ChatLayout({
         onPromoteLeader={async (groupId, username) => {
           setGroupMembersActionLoading(true)
           try {
-            const ok = await onPromoteLeader(groupId, username)
+            const ok = await onPromoteGroupLeader(groupId, username)
             if (ok) {
               await refreshGroupMembersDetail()
             }
@@ -687,13 +734,8 @@ export function ChatLayout({
 
       <FriendListModal
         isOpen={isFriendListModalOpen}
-        friends={friends}
         onlineUsers={onlineUsers}
-        displayName={displayName}
-        userId={userId}
-        targetUser={targetUser}
         onClose={onCloseFriendListModal}
-        onStartChat={onStartChat}
       />
 
       <ConfirmModal
@@ -771,7 +813,7 @@ export function ChatLayout({
                         aria-label="Previous search result"
                         title="Previous"
                       >
-                        â†‘
+                        ^
                       </button>
                       <button
                         type="button"
@@ -781,7 +823,7 @@ export function ChatLayout({
                         aria-label="Next search result"
                         title="Next"
                       >
-                        â†“
+                        v
                       </button>
                       <button
                         type="button"
@@ -848,7 +890,7 @@ export function ChatLayout({
                           ref={(node) => {
                             messageElementRefs.current[messagePart.id] = node
                           }}
-                          onDoubleClick={() => onHeartMessage(targetUser, messagePart.id)}
+                          onDoubleClick={() => targetUser && sendHeartMessage(targetUser, messagePart.id)}
                           title="Double-click to heart"
                           className={`space-y-2 rounded-md transition-colors ${(() => {
                             const matchedResultIndex = searchResultIndexByMessageId[messagePart.id]
@@ -897,14 +939,14 @@ export function ChatLayout({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => onRetryMessage(messagePart.id)}
+                                onClick={() => retryMessage(messagePart.id)}
                                 className="rounded-md bg-white/15 px-2 py-0.5 text-[11px] font-semibold text-white hover:bg-white/25"
                               >
                                 Retry
                               </button>
                               <button
                                 type="button"
-                                onClick={() => onDeleteMessage(messagePart.id)}
+                                onClick={() => deleteMessage(messagePart.id)}
                                 className="rounded-md bg-red-950/60 px-2 py-0.5 text-[11px] font-semibold text-red-100 hover:bg-red-900/70"
                               >
                                 Delete
@@ -915,7 +957,7 @@ export function ChatLayout({
                     )}
                     <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
                       {group.messages.map((messagePart) => {
-                        const heartUsers = messagePart.reactions?.["â¤ï¸"] ?? []
+                        const heartUsers = messagePart.reactions?.["❤️"] ?? []
                         if (heartUsers.length === 0) {
                           return null
                         }
@@ -924,7 +966,7 @@ export function ChatLayout({
                           <button
                             key={`reaction-${messagePart.id}`}
                             type="button"
-                            onClick={() => onHeartMessage(targetUser, messagePart.id)}
+                            onClick={() => targetUser && sendHeartMessage(targetUser, messagePart.id)}
                             className="inline-flex items-center gap-1 rounded-full bg-black/20 px-2 py-0.5 text-[11px] text-gray-100 cursor-pointer hover:bg-black/30"
                             title={`Hearted by: ${heartUsers.join(", ")}`}
                             aria-label="Toggle heart reaction"
