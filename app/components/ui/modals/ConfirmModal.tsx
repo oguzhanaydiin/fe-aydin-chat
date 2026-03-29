@@ -1,4 +1,4 @@
-import { GenericModal } from "@/app/components/ui/modal/GenericModal"
+import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 
 type ConfirmModalProps = {
   isOpen: boolean

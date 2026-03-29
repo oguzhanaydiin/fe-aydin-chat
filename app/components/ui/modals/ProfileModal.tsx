@@ -1,7 +1,7 @@
 ﻿"use client"
 import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
-import { GenericModal } from "@/app/components/ui/modal/GenericModal"
+import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { getUserProfile } from "@/utils/chatApi"
 import type { PublicProfile } from "@/utils/chatTypes"
 

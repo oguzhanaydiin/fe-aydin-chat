@@ -1,5 +1,5 @@
 ﻿import { useMemo, useState } from "react"
-import { GenericModal } from "@/app/components/ui/modal/GenericModal"
+import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import type { GroupDetail } from "@/utils/chatTypes"
 import { normalizeIdentity } from "@/utils/identity"
 

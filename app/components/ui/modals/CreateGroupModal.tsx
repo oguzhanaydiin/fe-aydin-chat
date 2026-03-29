@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react"
-import { GenericModal } from "@/app/components/ui/modal/GenericModal"
+import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { normalizeIdentity } from "@/utils/identity"
 
 type CreateGroupModalProps = {
