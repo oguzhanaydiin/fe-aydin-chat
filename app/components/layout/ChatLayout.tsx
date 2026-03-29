@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ChangeEvent, FormEvent } from "react"
 import Image from "next/image"
 import type { ChatMessage, GroupDetail } from "@/utils/chatTypes"
@@ -12,6 +12,7 @@ import { useGroups } from "@/hooks/useGroups"
 import { useChatActivity } from "@/hooks/useChatActivity"
 import { useImageMessage } from "@/hooks/useImageMessage"
 import { WS_URL, resolveMaxWsTextLength } from "@/utils/chatConfig"
+import { getUserProfile } from "@/utils/chatApi"
 import { AddFriendModal } from "@/app/components/ui/modals/AddFriendModal"
 import { ConfirmModal } from "@/app/components/ui/modals/ConfirmModal"
 import { CreateGroupModal } from "@/app/components/ui/modals/CreateGroupModal"
@@ -19,6 +20,7 @@ import { FriendListModal } from "@/app/components/ui/modals/FriendListModal"
 import { GroupMembersModal } from "@/app/components/ui/modals/GroupMembersModal"
 import { OwnProfileModal, PeerProfileModal } from "@/app/components/ui/modals/ProfileModal"
 import { AccordionSection } from "@/app/components/ui/AccordionSection"
+import { AvatarBadge } from "@/app/components/ui/AvatarBadge"
 
 type MessageGroup = {
   fromUserId: string
@@ -90,6 +92,16 @@ function groupMessages(currentMessages: ChatMessage[]) {
 
     return groups
   }, [])
+}
+
+function normalizeConversationKey(conversationId: string) {
+  const trimmed = conversationId.trim()
+  if (!trimmed.startsWith("group:")) {
+    return trimmed
+  }
+
+  const groupId = trimmed.slice("group:".length).trim().toLowerCase()
+  return groupId ? `group:${groupId}` : trimmed
 }
 
 export function ChatLayout() {
@@ -175,7 +187,21 @@ export function ChatLayout() {
   })
 
   const currentMessages = useMemo(() => {
-    return targetUser ? messagesByPeer[targetUser] || [] : []
+    if (!targetUser) {
+      return []
+    }
+
+    const directMatch = messagesByPeer[targetUser]
+    if (directMatch) {
+      return directMatch
+    }
+
+    const normalizedTarget = normalizeConversationKey(targetUser)
+    if (normalizedTarget === targetUser) {
+      return []
+    }
+
+    return messagesByPeer[normalizedTarget] || []
   }, [messagesByPeer, targetUser])
 
   useEffect(() => {
@@ -210,6 +236,8 @@ export function ChatLayout() {
   const [isGroupsOpen, setIsGroupsOpen] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(-1)
+  const [groupSenderAvatarsByUser, setGroupSenderAvatarsByUser] = useState<Record<string, string | null>>({})
+  const pendingGroupAvatarFetchesRef = useRef(new Set<string>())
   const normalizedDisplayName = displayName.trim().toLowerCase()
   const normalizedUserId = userId.trim().toLowerCase()
   const onlineUsersSet = new Set(onlineUsers.map((u) => u.trim().toLowerCase()))
@@ -219,8 +247,82 @@ export function ChatLayout() {
   })
   const selectedGroupId = targetUser?.startsWith("group:") ? targetUser.slice("group:".length) : null
   const selectedGroup = selectedGroupId
-    ? groups.find((group) => group.group_id === selectedGroupId) ?? null
+    ? groups.find((group) => group.group_id.trim().toLowerCase() === selectedGroupId.trim().toLowerCase()) ?? null
     : null
+  const isGroupConversation = Boolean(selectedGroupId)
+
+  useEffect(() => {
+    if (!isGroupConversation || !token) {
+      return
+    }
+
+    const uniqueGroupSenders = Array.from(
+      new Set(
+        currentMessages
+          .map((msg) => msg.from_user_id.trim())
+          .filter((senderId) => senderId && senderId !== userId),
+      ),
+    )
+
+    const fetchTargets = uniqueGroupSenders.filter((senderId) => {
+      return !(senderId in groupSenderAvatarsByUser) && !pendingGroupAvatarFetchesRef.current.has(senderId)
+    })
+
+    if (fetchTargets.length === 0) {
+      return
+    }
+
+    fetchTargets.forEach((senderId) => pendingGroupAvatarFetchesRef.current.add(senderId))
+
+    let cancelled = false
+    void Promise.allSettled(
+      fetchTargets.map(async (senderId) => {
+        try {
+          const profile = await getUserProfile(token, senderId)
+          return [senderId, profile.avatar_data_url ?? null] as const
+        } catch {
+          return [senderId, null] as const
+        }
+      }),
+    )
+      .then((results) => {
+        if (cancelled) {
+          return
+        }
+
+        const resolvedAvatars: Record<string, string | null> = {}
+        results.forEach((result) => {
+          if (result.status !== "fulfilled") {
+            return
+          }
+
+          const [senderId, avatarDataUrl] = result.value
+          resolvedAvatars[senderId] = avatarDataUrl
+        })
+
+        if (Object.keys(resolvedAvatars).length === 0) {
+          return
+        }
+
+        queueMicrotask(() => {
+          if (cancelled) {
+            return
+          }
+
+          setGroupSenderAvatarsByUser((prev) => ({
+            ...prev,
+            ...resolvedAvatars,
+          }))
+        })
+      })
+      .finally(() => {
+        fetchTargets.forEach((senderId) => pendingGroupAvatarFetchesRef.current.delete(senderId))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [currentMessages, groupSenderAvatarsByUser, isGroupConversation, token, userId])
 
   const openGroupMembersModal = async () => {
     if (!selectedGroup) {
@@ -626,37 +728,25 @@ export function ChatLayout() {
             <p className="mt-3 rounded-md border border-red-900 bg-red-950 px-2 py-1.5 text-xs text-red-300">{friendActionError}</p>
           )}
         </div>
-        <div className="mt-4 pt-4 border-t border-gray-700 text-xs">
+        <div className="mt-4 pt-4 border-t border-gray-700 text-xs flex items-center gap-2">
           <button
             type="button"
             onClick={() => setIsOwnProfileOpen(true)}
-            className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-700 transition"
+            className="flex flex-1 items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-gray-700 transition min-w-0"
           >
-            {ownAvatarDataUrl ? (
-              <Image
-                src={ownAvatarDataUrl}
-                alt="Your avatar"
-                width={28}
-                height={28}
-                unoptimized
-                className="h-7 w-7 rounded-full object-cover border border-gray-600 shrink-0"
-              />
-            ) : (
-              <div className="h-7 w-7 rounded-full bg-gray-600 flex items-center justify-center text-xs font-bold text-blue-300 border border-gray-500 shrink-0">
-                {displayName.charAt(0).toUpperCase()}
-              </div>
-            )}
+            <AvatarBadge
+              src={ownAvatarDataUrl}
+              label={displayName || userId || "You"}
+            />
             <span className="truncate text-gray-300 font-mono">{displayName}</span>
           </button>
-          <div className="mt-2 flex justify-center">
-            <button
-              type="button"
-              onClick={onLogout}
-              className="rounded-md border border-gray-600 px-3 py-1 text-[11px] text-gray-400 hover:bg-gray-700"
-            >
-              Logout
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="flex-shrink-0 rounded-md border border-gray-600 px-3 py-1 text-[11px] text-gray-400 hover:bg-gray-700"
+          >
+            Logout
+          </button>
         </div>
       </div>
 
@@ -766,9 +856,9 @@ export function ChatLayout() {
                         setPeerProfileUsername(targetUser)
                       }
                     }}
-                    className="font-bold text-lg hover:underline text-left"
+                    className="font-bold text-lg hover:underline text-left text-blue-400"
                   >
-                    Chat: <span className="text-blue-400">{selectedGroup ? selectedGroup.name : targetUser}</span>
+                    {selectedGroup ? selectedGroup.name : targetUser}
                   </button>
                   {selectedGroup ? (
                     <button
@@ -874,8 +964,26 @@ export function ChatLayout() {
               {currentMessages.length === 0 && (
                 <div className="text-center text-gray-600 mt-10 text-sm">No messages.</div>
               )}
-              {groupedMessages.map((group, index) => (
-                <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={`flex ${group.fromUserId === userId ? "justify-end" : "justify-start"}`}>
+              {groupedMessages.map((group, index) => {
+                const isOwnMessage = group.fromUserId === userId
+                const senderLabel = group.fromUserId
+                const senderAvatarDataUrl = groupSenderAvatarsByUser[group.fromUserId.trim()] ?? null
+                const groupRowClassName = isOwnMessage
+                  ? "flex justify-end pr-2"
+                  : isGroupConversation
+                    ? "flex items-stretch gap-2 pl-2"
+                    : "flex justify-start pl-2"
+
+                return (
+                <div key={`${group.fromUserId}-${group.createdAt}-${index}`} className={groupRowClassName}>
+                  {!isOwnMessage && isGroupConversation ? (
+                    <div className="flex flex-col justify-end flex-shrink-0">
+                      <AvatarBadge
+                        src={senderAvatarDataUrl}
+                        label={senderLabel}
+                      />
+                    </div>
+                  ) : null}
                   <div className={`max-w-[70%] p-3 rounded-2xl wrap-break-word ${
                     group.fromUserId === userId && group.deliveryStatus === "failed"
                       ? "bg-red-700/80 border border-red-400/50 rounded-br-none"
@@ -883,6 +991,11 @@ export function ChatLayout() {
                         ? "bg-blue-600 rounded-br-none"
                         : "bg-gray-700 rounded-bl-none"
                   }`}>
+                    {isGroupConversation && !isOwnMessage ? (
+                      <p className="mb-1 text-[11px] font-semibold text-teal-200">
+                        {senderLabel}
+                      </p>
+                    ) : null}
                     <div className="space-y-1.5">
                       {group.messages.map((messagePart) => (
                         <div
@@ -979,7 +1092,8 @@ export function ChatLayout() {
                     </div>
                   </div>
                 </div>
-              ))}
+                )
+              })}
               <div ref={messagesEndRef} />
             </div>
 
