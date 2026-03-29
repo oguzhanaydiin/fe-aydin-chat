@@ -1,6 +1,16 @@
-﻿import { useCallback, useEffect, useState } from "react"
-import { addGroupMember, createGroup, fetchGroupDetail, fetchGroups, updateGroupMemberPermissions } from "@/utils/chatApi"
-import type { GroupDetail, GroupSummary } from "@/utils/chatTypes"
+﻿import { useCallback, useEffect } from "react"
+import { fetchGroupDetail } from "@/utils/chatApi"
+import type { GroupDetail } from "@/utils/chatTypes"
+import { useAppDispatch, useAppSelector } from "@/store/hooks"
+import {
+  addGroupMemberAction,
+  createGroupAction,
+  fetchGroupsRequest,
+  grantInvitePermissionAction,
+  promoteGroupLeaderAction,
+  resetGroupsState as resetGroupsStateAction,
+  setGroupsError,
+} from "@/store/features/groupsSlice"
 
 interface UseGroupsOptions {
   token: string
@@ -8,28 +18,17 @@ interface UseGroupsOptions {
 }
 
 export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
-  const [groups, setGroups] = useState<GroupSummary[]>([])
-  const [groupsLoading, setGroupsLoading] = useState(false)
-  const [groupsError, setGroupsError] = useState<string | null>(null)
+  const dispatch = useAppDispatch()
+  const { groups, groupsLoading, groupsError } = useAppSelector((state) => state.groups)
 
   const reloadGroups = useCallback(async () => {
     if (!token || !isAuthenticated) {
-      setGroups([])
+      dispatch(resetGroupsStateAction())
       return
     }
 
-    setGroupsLoading(true)
-    setGroupsError(null)
-
-    try {
-      const nextGroups = await fetchGroups(token)
-      setGroups(nextGroups)
-    } catch (err) {
-      setGroupsError(err instanceof Error ? err.message : "Could not load groups")
-    } finally {
-      setGroupsLoading(false)
-    }
-  }, [isAuthenticated, token])
+    await dispatch(fetchGroupsRequest(token))
+  }, [dispatch, isAuthenticated, token])
 
   useEffect(() => {
     void reloadGroups()
@@ -45,15 +44,18 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
       return null
     }
 
-    try {
-      const createdGroup = await createGroup(token, normalizedName, initialMembers)
-      await reloadGroups()
-      return createdGroup.group_id
-    } catch (err) {
-      setGroupsError(err instanceof Error ? err.message : "Could not create group")
-      return null
+    const action = await dispatch(createGroupAction({
+      token,
+      name: normalizedName,
+      initialMembers,
+    }))
+
+    if (createGroupAction.fulfilled.match(action)) {
+      return action.payload.createdGroupId
     }
-  }, [reloadGroups, token])
+
+    return null
+  }, [dispatch, token])
 
   const onAddGroupMember = useCallback(async (groupId: string, username: string) => {
     if (!token) {
@@ -66,15 +68,14 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
       return false
     }
 
-    try {
-      await addGroupMember(token, normalizedGroupId, normalizedUsername)
-      await reloadGroups()
-      return true
-    } catch (err) {
-      setGroupsError(err instanceof Error ? err.message : "Could not add member")
-      return false
-    }
-  }, [reloadGroups, token])
+    const action = await dispatch(addGroupMemberAction({
+      token,
+      groupId: normalizedGroupId,
+      username: normalizedUsername,
+    }))
+
+    return addGroupMemberAction.fulfilled.match(action)
+  }, [dispatch, token])
 
   const onGrantInvitePermission = useCallback(async (groupId: string, username: string) => {
     if (!token) {
@@ -87,17 +88,14 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
       return false
     }
 
-    try {
-      await updateGroupMemberPermissions(token, normalizedGroupId, normalizedUsername, {
-        can_invite: true,
-      })
-      await reloadGroups()
-      return true
-    } catch (err) {
-      setGroupsError(err instanceof Error ? err.message : "Could not update invite permission")
-      return false
-    }
-  }, [reloadGroups, token])
+    const action = await dispatch(grantInvitePermissionAction({
+      token,
+      groupId: normalizedGroupId,
+      username: normalizedUsername,
+    }))
+
+    return grantInvitePermissionAction.fulfilled.match(action)
+  }, [dispatch, token])
 
   const onPromoteGroupLeader = useCallback(async (groupId: string, username: string) => {
     if (!token) {
@@ -110,17 +108,14 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
       return false
     }
 
-    try {
-      await updateGroupMemberPermissions(token, normalizedGroupId, normalizedUsername, {
-        role: "leader",
-      })
-      await reloadGroups()
-      return true
-    } catch (err) {
-      setGroupsError(err instanceof Error ? err.message : "Could not promote member")
-      return false
-    }
-  }, [reloadGroups, token])
+    const action = await dispatch(promoteGroupLeaderAction({
+      token,
+      groupId: normalizedGroupId,
+      username: normalizedUsername,
+    }))
+
+    return promoteGroupLeaderAction.fulfilled.match(action)
+  }, [dispatch, token])
 
   const onGetGroupDetail = useCallback(async (groupId: string): Promise<GroupDetail | null> => {
     if (!token) {
@@ -135,16 +130,14 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
     try {
       return await fetchGroupDetail(token, normalizedGroupId)
     } catch (err) {
-      setGroupsError(err instanceof Error ? err.message : "Could not load group details")
+      dispatch(setGroupsError(err instanceof Error ? err.message : "Could not load group details"))
       return null
     }
-  }, [token])
+  }, [dispatch, token])
 
   const resetGroupsState = useCallback(() => {
-    setGroups([])
-    setGroupsLoading(false)
-    setGroupsError(null)
-  }, [])
+    dispatch(resetGroupsStateAction())
+  }, [dispatch])
 
   return {
     groups,
