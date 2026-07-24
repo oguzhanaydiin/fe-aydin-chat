@@ -6,7 +6,7 @@ import { getUserProfile } from "@/utils/chatApi"
 import type { PublicProfile } from "@/utils/chatTypes"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectAuthState } from "@/store/selectors"
-import { updateProfileRequest } from "@/store/features/authSlice"
+import { resolveChatUsername, resolveDisplayName, updateProfileRequest } from "@/store/features/authSlice"
 
 const MAX_AVATAR_BYTES = 512 * 1024 // 512 KB
 
@@ -94,7 +94,7 @@ export function OwnProfileModal({
 }: OwnProfileModalProps) {
   const dispatch = useAppDispatch()
   const { authSession, profileLoading, profileError } = useAppSelector(selectAuthState)
-  const username = authSession?.username || authSession?.userId || ""
+  const username = resolveChatUsername(authSession) || resolveDisplayName(authSession)
   const email = authSession?.email || ""
   const initialAvatarDataUrl = authSession?.avatar_data_url ?? null
 

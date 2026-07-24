@@ -3,6 +3,7 @@ import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { normalizeIdentity } from "@/utils/identity"
 import { useAppSelector } from "@/store/hooks"
 import { selectAuthState, selectFriendshipState, selectGroupsState } from "@/store/selectors"
+import { resolveChatUsername, resolveDisplayName } from "@/store/features/authSlice"
 
 type CreateGroupModalProps = {
   isOpen: boolean
@@ -19,8 +20,8 @@ export function CreateGroupModal({
   const { friends } = useAppSelector(selectFriendshipState)
   const { groupsLoading, groupsError } = useAppSelector(selectGroupsState)
 
-  const displayName = authSession?.username || authSession?.userId || ""
-  const userId = authSession?.userId || ""
+  const displayName = resolveDisplayName(authSession)
+  const userId = resolveChatUsername(authSession)
 
   const [name, setName] = useState("")
   const [selectedMembers, setSelectedMembers] = useState<string[]>([])

@@ -4,6 +4,8 @@ import { selectAuthState } from "@/store/selectors"
 import {
   clearAuthState,
   hydrateAuthSession,
+  resolveChatUsername,
+  resolveDisplayName,
   saveUsernameRequest,
   sendOtpRequest,
   setAuthError,
@@ -51,9 +53,9 @@ export function useAuthFlow() {
     }
   }, [dispatch, hydrationComplete])
 
-  const userId = authSession?.userId || ""
+  const userId = resolveChatUsername(authSession)
   const token = authSession?.token || ""
-  const displayName = authSession?.username || authSession?.userId || ""
+  const displayName = resolveDisplayName(authSession)
 
   useEffect(() => {
     if (displayName) {
@@ -147,6 +149,7 @@ export function useAuthFlow() {
     usernameError,
     profileLoading,
     profileError,
+    hydrationComplete,
     setEmailInput: onEmailChange,
     setOtpInput: onOtpChange,
     setUsernameInput: onUsernameChange,

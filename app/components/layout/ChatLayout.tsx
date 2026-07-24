@@ -5,7 +5,7 @@ import type { ChatMessage, GroupDetail } from "@/utils/chatTypes"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectAuthState, selectChatUiState, selectFriendshipState, selectGroupsState } from "@/store/selectors"
 import { setMessage as setMessageAction, setTargetUser as setTargetUserAction, resetChatUi } from "@/store/features/chatUiSlice"
-import { clearAuthState } from "@/store/features/authSlice"
+import { clearAuthState, resolveChatUsername, resolveDisplayName } from "@/store/features/authSlice"
 import { useChatSocket } from "@/hooks/useChatSocket"
 import { useFriendship } from "@/hooks/useFriendship"
 import { useGroups } from "@/hooks/useGroups"
@@ -109,9 +109,9 @@ export function ChatLayout() {
   const dispatch = useAppDispatch()
   const { authSession } = useAppSelector(selectAuthState)
   const { targetUser, message } = useAppSelector(selectChatUiState)
-  const userId = authSession?.userId || ""
+  const userId = resolveChatUsername(authSession)
   const token = authSession?.token || ""
-  const displayName = authSession?.username || authSession?.userId || ""
+  const displayName = resolveDisplayName(authSession)
   const ownAvatarDataUrl = authSession?.avatar_data_url
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null)

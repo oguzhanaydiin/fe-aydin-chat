@@ -2,6 +2,7 @@ import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectAuthState, selectFriendshipState } from "@/store/selectors"
 import { sendFriendRequestAction } from "@/store/features/friendshipSlice"
+import { resolveChatUsername, resolveDisplayName } from "@/store/features/authSlice"
 
 type AddFriendModalProps = {
   isOpen: boolean
@@ -29,8 +30,8 @@ export function AddFriendModal({
     friendActionError,
   } = useAppSelector(selectFriendshipState)
 
-  const displayName = authSession?.username || authSession?.userId || ""
-  const userId = authSession?.userId || ""
+  const displayName = resolveDisplayName(authSession)
+  const userId = resolveChatUsername(authSession)
   const token = authSession?.token || ""
 
   const normalizedDisplayName = normalizeIdentity(displayName)

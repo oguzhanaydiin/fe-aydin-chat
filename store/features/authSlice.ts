@@ -4,12 +4,70 @@ import { SESSION_STORAGE_KEY } from "@/utils/chatConfig"
 import type { RootState } from "@/store"
 
 export type AuthSession = {
-  token: string
+  /** Stable account id from the backend (Mongo ObjectId). Not a chat handle. */
   userId: string
+  token: string
   email: string
+  /** Chat/WS identity. Null until username setup completes. */
   username: string | null
   needsUsernameSetup: boolean
   avatar_data_url?: string | null
+}
+
+/** Stable account id — do not use for WS/chat peer identity. */
+export function resolveAccountUserId(session: AuthSession | null | undefined): string {
+  return session?.userId?.trim() || ""
+}
+
+/** Chat/WS identity — username only. Empty until setup is complete. */
+export function resolveChatUsername(session: AuthSession | null | undefined): string {
+  return session?.username?.trim() || ""
+}
+
+/** @deprecated Use resolveChatUsername — kept for older call sites during the split. */
+export function resolveChatUserId(session: AuthSession | null | undefined): string {
+  return resolveChatUsername(session)
+}
+
+export function resolveDisplayName(session: AuthSession | null | undefined): string {
+  return session?.username?.trim() || session?.email?.trim() || ""
+}
+
+function isMongoObjectId(value: string): boolean {
+  return /^[a-f0-9]{24}$/i.test(value.trim())
+}
+
+function normalizeAuthSession(raw: AuthSession): AuthSession | null {
+  const token = raw.token?.trim()
+  const email = raw.email?.trim().toLowerCase()
+  if (!token || !email) {
+    return null
+  }
+
+  let username = raw.username?.trim() || null
+  let userId = raw.userId?.trim() || ""
+
+  // Legacy: userId was the username before stable account ids existed.
+  if (!username && userId && !isMongoObjectId(userId)) {
+    username = userId
+  }
+
+  if (username && userId === username && !isMongoObjectId(userId)) {
+    userId = email
+  }
+
+  if (!userId) {
+    userId = email
+  }
+
+  return {
+    ...raw,
+    token,
+    email,
+    userId,
+    username,
+    needsUsernameSetup: !username,
+  }
 }
 
 type AuthState = {
@@ -51,14 +109,10 @@ function parsePersistedSession(raw: string | null): AuthSession | null {
 
   try {
     const parsed = JSON.parse(raw) as AuthSession
-    if (parsed.token && parsed.userId && parsed.email) {
-      return parsed
-    }
+    return normalizeAuthSession(parsed)
   } catch {
     return null
   }
-
-  return null
 }
 
 function persistSession(session: AuthSession) {
@@ -90,6 +144,7 @@ export const hydrateAuthSession = createAsyncThunk<AuthSession | null>(
       return null
     }
 
+    persistSession(parsed)
     return parsed
   },
 )
@@ -114,17 +169,22 @@ export const verifyOtpRequest = createAsyncThunk<
 >("auth/verifyOtpRequest", async ({ email, otp }, { rejectWithValue }) => {
   try {
     const result = await verifyOtp(email, otp)
-    if (!result.valid || !result.token || !result.user_id || !result.email) {
+    // Auth can succeed without username (and without user_id on older backends).
+    // Chat is gated later via needsUsernameSetup.
+    if (!result.valid || !result.token || !result.email) {
       return rejectWithValue("OTP is invalid or expired.")
     }
 
-    const needsUsernameSetup = !result.username?.trim()
-    const session: AuthSession = {
+    const session = normalizeAuthSession({
       token: result.token,
-      userId: result.user_id,
+      userId: result.user_id?.trim() || result.email.trim().toLowerCase(),
       email: result.email,
       username: result.username ?? null,
-      needsUsernameSetup,
+      needsUsernameSetup: !result.username?.trim(),
+    })
+
+    if (!session) {
+      return rejectWithValue("OTP is invalid or expired.")
     }
 
     persistSession(session)
