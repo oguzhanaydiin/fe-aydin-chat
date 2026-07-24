@@ -17,6 +17,7 @@ export default function ChatPage() {
     usernameInput,
     usernameLoading,
     usernameError,
+    hydrationComplete,
     setEmailInput,
     setOtpInput,
     setUsernameInput,
@@ -29,6 +30,10 @@ export default function ChatPage() {
   const onLogout = useCallback(() => {
     onLogoutAuth()
   }, [onLogoutAuth])
+
+  if (!hydrationComplete) {
+    return null
+  }
 
   if (!authSession) {
     return (
@@ -47,6 +52,7 @@ export default function ChatPage() {
     )
   }
 
+  // Authenticated accounts without a username stay on setup — chat requires username.
   if (authSession.needsUsernameSetup) {
     return (
       <UsernameSetupView
