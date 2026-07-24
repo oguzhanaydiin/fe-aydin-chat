@@ -2,6 +2,7 @@ import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectAuthState, selectChatUiState, selectFriendshipState } from "@/store/selectors"
 import { setTargetUser } from "@/store/features/chatUiSlice"
+import { resolveChatUsername, resolveDisplayName } from "@/store/features/authSlice"
 
 type FriendListModalProps = {
   isOpen: boolean
@@ -23,8 +24,8 @@ export function FriendListModal({
   const { friends } = useAppSelector(selectFriendshipState)
   const { targetUser } = useAppSelector(selectChatUiState)
 
-  const displayName = authSession?.username || authSession?.userId || ""
-  const userId = authSession?.userId || ""
+  const displayName = resolveDisplayName(authSession)
+  const userId = resolveChatUsername(authSession)
   const normalizedDisplayName = normalizeIdentity(displayName)
   const normalizedUserId = normalizeIdentity(userId)
   const onlineUsersSet = new Set(onlineUsers.map((candidate) => normalizeIdentity(candidate)))
