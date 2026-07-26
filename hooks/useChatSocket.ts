@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { CHAT_HISTORY_MAX_MESSAGES_PER_PEER } from "@/utils/chatConfig"
 import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/utils/chatTypes"
 
 interface UseChatSocketOptions {
@@ -15,7 +16,8 @@ export function useChatSocket({
   wsUrl,
 }: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
-  const SEND_CONFIRM_TIMEOUT_MS = 10000
+  /** Small images (~512KB) still need headroom on slow links. */
+  const SEND_CONFIRM_TIMEOUT_MS = 20000
   const CHAT_HISTORY_DB_NAME = "chat_history_db"
   const CHAT_HISTORY_STORE_NAME = "histories"
 
@@ -47,7 +49,9 @@ export function useChatSocket({
       : (typeof incoming.to_username === "string" ? incoming.to_username : (groupId ? `group:${groupId}` : ""))
     const createdAt = typeof incoming.created_at === "string" ? incoming.created_at : new Date().toISOString()
     const text = typeof incoming.text === "string" ? incoming.text : ""
-    const imageDataUrl = typeof incoming.image_data_url === "string" ? incoming.image_data_url : undefined
+    const imageDataUrl = typeof incoming.image_data_url === "string" && incoming.image_data_url.trim()
+      ? incoming.image_data_url.trim()
+      : undefined
     const reactions = (() => {
       const rawReactions = incoming.reactions
       if (!rawReactions || typeof rawReactions !== "object" || Array.isArray(rawReactions)) {
@@ -427,16 +431,28 @@ export function useChatSocket({
     [CHAT_HISTORY_STORE_NAME, openHistoryDb],
   )
 
+  const pruneHistoryForStorage = useCallback((nextMessagesByPeer: Record<string, ChatMessage[]>) => {
+    const pruned: Record<string, ChatMessage[]> = {}
+
+    // Keep image payloads in IndexedDB (client-owned history); only cap count.
+    Object.entries(nextMessagesByPeer).forEach(([peerId, messages]) => {
+      pruned[peerId] = messages.slice(-CHAT_HISTORY_MAX_MESSAGES_PER_PEER)
+    })
+
+    return pruned
+  }, [])
+
   const writeHistory = useCallback(
     async (currentUserId: string, nextMessagesByPeer: Record<string, ChatMessage[]>) => {
       const db = await openHistoryDb()
+      const messagesByPeer = pruneHistoryForStorage(nextMessagesByPeer)
 
       await new Promise<void>((resolve, reject) => {
         const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readwrite")
         const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
         store.put({
           userId: currentUserId,
-          messagesByPeer: nextMessagesByPeer,
+          messagesByPeer,
           updatedAt: Date.now(),
         })
 
@@ -456,7 +472,7 @@ export function useChatSocket({
         }
       })
     },
-    [CHAT_HISTORY_STORE_NAME, openHistoryDb],
+    [CHAT_HISTORY_STORE_NAME, openHistoryDb, pruneHistoryForStorage],
   )
 
   const appendMessage = useCallback(
@@ -1016,6 +1032,13 @@ export function useChatSocket({
       if (!normalizedImage || !toUserId || !userId) return
 
       const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const eventToSend: WsClientEvent = {
+        type: "send_message",
+        to_user_id: toUserId,
+        text: "",
+        image_data_url: normalizedImage,
+        client_message_id: clientMessageId,
+      }
 
       const localMessage: ChatMessage = {
         id: clientMessageId,
@@ -1029,14 +1052,16 @@ export function useChatSocket({
       }
 
       appendMessage(localMessage)
-      const sent = sendEvent({
-        type: "send_message",
-        to_user_id: toUserId,
-        text: "",
-        image_data_url: normalizedImage,
-        client_message_id: clientMessageId,
-      })
 
+      const canSendNow = socketRef.current?.readyState === WebSocket.OPEN && isWsRegisteredRef.current
+      if (!canSendNow) {
+        pendingRetryEventsRef.current[clientMessageId] = eventToSend
+        connectRef.current()
+        schedulePendingSendTimeout(clientMessageId, clientMessageId)
+        return
+      }
+
+      const sent = sendEvent(eventToSend)
       if (!sent) {
         markOutgoingMessageAsFailed({
           clientMessageId,
@@ -1097,6 +1122,13 @@ export function useChatSocket({
 
       const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const groupConversationId = `group:${normalizedGroupId}`
+      const eventToSend: WsClientEvent = {
+        type: "send_group_message",
+        group_id: normalizedGroupId,
+        text: "",
+        image_data_url: normalizedImage,
+        client_message_id: clientMessageId,
+      }
 
       const localMessage: ChatMessage = {
         id: clientMessageId,
@@ -1111,14 +1143,16 @@ export function useChatSocket({
       }
 
       appendMessage(localMessage)
-      const sent = sendEvent({
-        type: "send_group_message",
-        group_id: normalizedGroupId,
-        text: "",
-        image_data_url: normalizedImage,
-        client_message_id: clientMessageId,
-      })
 
+      const canSendNow = socketRef.current?.readyState === WebSocket.OPEN && isWsRegisteredRef.current
+      if (!canSendNow) {
+        pendingRetryEventsRef.current[clientMessageId] = eventToSend
+        connectRef.current()
+        schedulePendingSendTimeout(clientMessageId, clientMessageId)
+        return
+      }
+
+      const sent = sendEvent(eventToSend)
       if (!sent) {
         markOutgoingMessageAsFailed({
           clientMessageId,

@@ -40,11 +40,7 @@ async function optimizeImageForMessage(file: File) {
   const sourceDataUrl = await fileToDataUrl(file)
   const image = await loadImageFromDataUrl(sourceDataUrl)
 
-  const maxImageDataUrlLength = Number(process.env.NEXT_PUBLIC_WS_MAX_IMAGE_DATA_URL_LENGTH)
-  const targetMaxDataUrlLength = Number.isFinite(maxImageDataUrlLength) && maxImageDataUrlLength > 4096
-    ? Math.floor(maxImageDataUrlLength)
-    : BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH
-  const maxDataUrlLength = Math.max(4096, targetMaxDataUrlLength - 512)
+  const maxDataUrlLength = Math.max(4096, BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH - 512)
   const canvas = document.createElement("canvas")
   const ctx = canvas.getContext("2d")
   if (!ctx) {
@@ -56,7 +52,7 @@ async function optimizeImageForMessage(file: File) {
 
   const encodeWithinTarget = (mimeType: "image/webp" | "image/jpeg") => {
     let low = 0.3
-    let high = 0.95
+    let high = 0.92
     let best = ""
 
     for (let i = 0; i < 8; i += 1) {
@@ -109,7 +105,10 @@ export function useImageMessage({
       return
     }
 
-    if (!file.type.startsWith("image/")) {
+    const looksLikeImage = file.type.startsWith("image/")
+      || /\.(jpe?g|png|webp|gif|heic|heif)$/i.test(file.name)
+    if (!looksLikeImage) {
+      window.alert("Please choose an image file.")
       return
     }
 
@@ -123,7 +122,7 @@ export function useImageMessage({
       const imageDataUrl = await optimizeImageForMessage(file)
 
       if (imageDataUrl.length > BACKEND_MAX_WS_IMAGE_DATA_URL_LENGTH) {
-        window.alert("Image is too large for chat image limit. Try a smaller image.")
+        window.alert("Image is too large for chat. Try a smaller image.")
         return
       }
 
