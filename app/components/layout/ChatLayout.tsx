@@ -21,6 +21,7 @@ import { GroupMembersModal } from "@/app/components/ui/modals/GroupMembersModal"
 import { OwnProfileModal, PeerProfileModal } from "@/app/components/ui/modals/ProfileModal"
 import { AccordionSection } from "@/app/components/ui/AccordionSection"
 import { AvatarBadge } from "@/app/components/ui/AvatarBadge"
+import { canMessagePeer } from "@/utils/identity"
 
 type MessageGroup = {
   fromUserId: string
@@ -109,6 +110,15 @@ export function ChatLayout() {
   const dispatch = useAppDispatch()
   const { authSession } = useAppSelector(selectAuthState)
   const { targetUser, message } = useAppSelector(selectChatUiState)
+  const {
+    friends,
+    incomingRequests,
+    outgoingRequests,
+    isAddUserModalOpen,
+    friendActionLoading,
+    friendActionError,
+  } = useAppSelector(selectFriendshipState)
+  const { groups, groupsError } = useAppSelector(selectGroupsState)
   const userId = resolveChatUsername(authSession)
   const token = authSession?.token || ""
   const displayName = resolveDisplayName(authSession)
@@ -132,6 +142,7 @@ export function ChatLayout() {
     userId,
     token,
     wsUrl: WS_URL,
+    acceptedFriends: friends,
   })
 
   const setTargetUser = useCallback((value: string | null) => {
@@ -208,16 +219,6 @@ export function ChatLayout() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messagesByPeer, targetUser])
 
-  const {
-    friends,
-    incomingRequests,
-    outgoingRequests,
-    isAddUserModalOpen,
-    friendActionLoading,
-    friendActionError,
-  } = useAppSelector(selectFriendshipState)
-  const { groups, groupsError } = useAppSelector(selectGroupsState)
-
   const groupedMessages = groupMessages(currentMessages)
   const imageInputRef = useRef<HTMLInputElement | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -250,6 +251,7 @@ export function ChatLayout() {
     ? groups.find((group) => group.group_id.trim().toLowerCase() === selectedGroupId.trim().toLowerCase()) ?? null
     : null
   const isGroupConversation = Boolean(selectedGroupId)
+  const canSendToTarget = canMessagePeer(targetUser, friends)
 
   useEffect(() => {
     if (!isGroupConversation || !token) {
@@ -462,6 +464,11 @@ export function ChatLayout() {
     e.preventDefault()
     const trimmed = message.trim()
     if (trimmed && targetUser && userId) {
+      if (!canSendToTarget) {
+        window.alert("You can only message accepted friends.")
+        return
+      }
+
       if (trimmed.length > maxWsTextLength) {
         window.alert(`Message is too long. Max ${maxWsTextLength} characters.`)
         return
@@ -503,6 +510,12 @@ export function ChatLayout() {
   const onImageInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
     if (file) {
+      if (!canSendToTarget) {
+        window.alert("You can only message accepted friends.")
+        event.target.value = ""
+        return
+      }
+
       void onSendImage(file)
     }
 
@@ -1102,13 +1115,15 @@ export function ChatLayout() {
                 <input
                   value={message}
                   onChange={(e) => onMessageChange(e.target.value)}
-                  placeholder="Type a message..."
-                  className="w-full bg-gray-700 border-none rounded-full pl-6 pr-14 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400"
+                  placeholder={canSendToTarget ? "Type a message..." : "Add this user as a friend to chat"}
+                  disabled={!canSendToTarget}
+                  className="w-full bg-gray-700 border-none rounded-full pl-6 pr-14 py-3 outline-none focus:ring-2 focus:ring-blue-500 text-white placeholder-gray-400 disabled:cursor-not-allowed disabled:opacity-60"
                 />
                 <button
                   type="button"
                   onClick={onImagePickerClick}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-gray-600 text-lg font-semibold leading-none hover:bg-gray-500 transition"
+                  disabled={!canSendToTarget}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-gray-600 text-lg font-semibold leading-none hover:bg-gray-500 transition disabled:cursor-not-allowed disabled:opacity-50"
                   aria-label="Add photo"
                   title="Add photo"
                 >
@@ -1124,7 +1139,7 @@ export function ChatLayout() {
               </div>
               <button
                 type="submit"
-                disabled={!message.trim()}
+                disabled={!canSendToTarget || !message.trim()}
                 className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2 rounded-full font-bold transition"
               >
                 Send

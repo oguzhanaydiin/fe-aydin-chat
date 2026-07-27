@@ -3,17 +3,20 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { CHAT_HISTORY_MAX_MESSAGES_PER_PEER } from "@/utils/chatConfig"
 import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/utils/chatTypes"
+import { canMessagePeer } from "@/utils/identity"
 
 interface UseChatSocketOptions {
   userId: string
   token: string
   wsUrl: string
+  acceptedFriends?: string[]
 }
 
 export function useChatSocket({
   userId,
   token,
   wsUrl,
+  acceptedFriends = [],
 }: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
   /** Small images (~512KB) still need headroom on slow links. */
@@ -994,6 +997,11 @@ export function useChatSocket({
       const trimmed = text.trim()
       if (!trimmed || !toUserId || !userId) return
 
+      if (!canMessagePeer(toUserId, acceptedFriends)) {
+        setError("You can only message accepted friends.")
+        return
+      }
+
       const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 
       const localMessage: ChatMessage = {
@@ -1023,13 +1031,18 @@ export function useChatSocket({
         schedulePendingSendTimeout(clientMessageId, clientMessageId)
       }
     },
-    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
+    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId, acceptedFriends],
   )
 
   const sendImageMessage = useCallback(
     (toUserId: string, imageDataUrl: string) => {
       const normalizedImage = imageDataUrl.trim()
       if (!normalizedImage || !toUserId || !userId) return
+
+      if (!canMessagePeer(toUserId, acceptedFriends)) {
+        setError("You can only message accepted friends.")
+        return
+      }
 
       const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const eventToSend: WsClientEvent = {
@@ -1071,7 +1084,7 @@ export function useChatSocket({
         schedulePendingSendTimeout(clientMessageId, clientMessageId)
       }
     },
-    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
+    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId, acceptedFriends],
   )
 
   const sendGroupMessage = useCallback(
@@ -1214,6 +1227,10 @@ export function useChatSocket({
             client_message_id: newClientMessageId,
           }
         } else {
+          if (!canMessagePeer(target.to_user_id, acceptedFriends)) {
+            return prev
+          }
+
           eventToSend = {
             type: "send_message",
             to_user_id: target.to_user_id,
@@ -1255,7 +1272,7 @@ export function useChatSocket({
     }
 
     return true
-  }, [schedulePendingSendTimeout, sendEvent, userId])
+  }, [schedulePendingSendTimeout, sendEvent, userId, acceptedFriends])
 
   const deleteMessage = useCallback((messageId: string) => {
     const normalizedMessageId = messageId.trim()
@@ -1390,6 +1407,11 @@ export function useChatSocket({
       return
     }
 
+    if (!canMessagePeer(normalizedConversation, acceptedFriends)) {
+      setError("You can only react on chats with accepted friends.")
+      return
+    }
+
     const heartReaction = "❤️"
     toggleLocalMessageReaction(normalizedMessageId, heartReaction, normalizedUserId)
     if (normalizedConversation.startsWith("group:")) {
@@ -1413,7 +1435,7 @@ export function useChatSocket({
       to_username: normalizedConversation,
       reaction: heartReaction,
     })
-  }, [sendEvent, toggleLocalMessageReaction, userId])
+  }, [acceptedFriends, sendEvent, toggleLocalMessageReaction, userId])
 
   return {
     onlineUsers,
