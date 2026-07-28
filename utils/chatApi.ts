@@ -1,4 +1,5 @@
-﻿import type {
+﻿import { AuthApiError } from "@/utils/authApiError"
+import type {
   AuthSessionResponse,
   FriendSnapshot,
   GroupDetail,
@@ -13,6 +14,11 @@
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8080"
 
+async function readErrorMessage(response: Response, fallback: string): Promise<string> {
+  const message = await response.text()
+  return message || fallback
+}
+
 export async function requestOtp(email: string): Promise<SendOtpResponse> {
   const response = await fetch(`${API_URL}/otp/send`, {
     method: "POST",
@@ -21,8 +27,7 @@ export async function requestOtp(email: string): Promise<SendOtpResponse> {
   })
 
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to send OTP")
+    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to send OTP"))
   }
 
   return (await response.json()) as SendOtpResponse
@@ -36,8 +41,7 @@ export async function verifyOtp(email: string, otp: string): Promise<AuthSession
   })
 
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to verify OTP")
+    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to verify OTP"))
   }
 
   return (await response.json()) as AuthSessionResponse
@@ -54,8 +58,7 @@ export async function saveUsername(token: string, username: string): Promise<Sav
   })
 
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to save username")
+    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to save username"))
   }
 
   return (await response.json()) as SaveUsernameResponse
@@ -304,8 +307,7 @@ export async function getMyProfile(token: string): Promise<UserProfile> {
   })
 
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to fetch profile")
+    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to fetch profile"))
   }
 
   return (await response.json()) as UserProfile
@@ -325,8 +327,7 @@ export async function updateProfile(
   })
 
   if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to update profile")
+    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to update profile"))
   }
 
   return (await response.json()) as UserProfile
