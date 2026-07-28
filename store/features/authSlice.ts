@@ -1,5 +1,10 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit"
-import { requestOtp, saveUsername, updateProfile, verifyOtp } from "@/utils/chatApi"
+import {
+  isUnauthorizedError,
+  SESSION_EXPIRED_MESSAGE,
+} from "@/utils/authApiError"
+import { resolveHydratedSession } from "@/utils/authHydrate"
+import { getMyProfile, requestOtp, saveUsername, updateProfile, verifyOtp } from "@/utils/chatApi"
 import { SESSION_STORAGE_KEY } from "@/utils/chatConfig"
 import type { RootState } from "@/store"
 
@@ -144,8 +149,14 @@ export const hydrateAuthSession = createAsyncThunk<AuthSession | null>(
       return null
     }
 
-    persistSession(parsed)
-    return parsed
+    const result = await resolveHydratedSession(parsed, getMyProfile)
+    if (result.status === "unauthorized") {
+      clearPersistedSession()
+      return null
+    }
+
+    persistSession(result.session)
+    return result.session
   },
 )
 
@@ -215,6 +226,10 @@ export const saveUsernameRequest = createAsyncThunk<
     persistSession(nextSession)
     return nextSession
   } catch (err) {
+    if (isUnauthorizedError(err)) {
+      clearPersistedSession()
+      return rejectWithValue(SESSION_EXPIRED_MESSAGE)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Username setup error")
   }
 })
@@ -244,9 +259,25 @@ export const updateProfileRequest = createAsyncThunk<
     persistSession(nextSession)
     return nextSession
   } catch (err) {
+    if (isUnauthorizedError(err)) {
+      clearPersistedSession()
+      return rejectWithValue(SESSION_EXPIRED_MESSAGE)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Failed to update profile")
   }
 })
+
+function clearSessionOnUnauthorized(
+  state: AuthState,
+  payload: string | undefined,
+): boolean {
+  if (payload !== SESSION_EXPIRED_MESSAGE) {
+    return false
+  }
+  state.authSession = null
+  state.authError = payload
+  return true
+}
 
 const authSlice = createSlice({
   name: "auth",
@@ -325,6 +356,10 @@ const authSlice = createSlice({
       })
       .addCase(saveUsernameRequest.rejected, (state, action) => {
         state.usernameLoading = false
+        if (clearSessionOnUnauthorized(state, action.payload)) {
+          state.usernameError = action.payload ?? SESSION_EXPIRED_MESSAGE
+          return
+        }
         state.usernameError = action.payload ?? "Username setup error"
       })
       .addCase(updateProfileRequest.pending, (state) => {
@@ -337,6 +372,10 @@ const authSlice = createSlice({
       })
       .addCase(updateProfileRequest.rejected, (state, action) => {
         state.profileLoading = false
+        if (clearSessionOnUnauthorized(state, action.payload)) {
+          state.profileError = action.payload ?? SESSION_EXPIRED_MESSAGE
+          return
+        }
         state.profileError = action.payload ?? "Failed to update profile"
       })
   },
