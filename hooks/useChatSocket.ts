@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { CHAT_HISTORY_MAX_MESSAGES_PER_PEER } from "@/utils/chatConfig"
 import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/utils/chatTypes"
 import { canMessagePeer } from "@/utils/identity"
+import {
+  canSendWsNow,
+  clearPendingRetryByClientMessageId as removePendingRetryByClientMessageId,
+  clientMessageIdFromPendingEvent,
+  mergeMessagesByPeer,
+  pruneHistoryForStorage as pruneHistoryForStorageHelper,
+} from "@/utils/messageDelivery"
 
 interface UseChatSocketOptions {
   userId: string
@@ -435,14 +442,8 @@ export function useChatSocket({
   )
 
   const pruneHistoryForStorage = useCallback((nextMessagesByPeer: Record<string, ChatMessage[]>) => {
-    const pruned: Record<string, ChatMessage[]> = {}
-
     // Keep image payloads in IndexedDB (client-owned history); only cap count.
-    Object.entries(nextMessagesByPeer).forEach(([peerId, messages]) => {
-      pruned[peerId] = messages.slice(-CHAT_HISTORY_MAX_MESSAGES_PER_PEER)
-    })
-
-    return pruned
+    return pruneHistoryForStorageHelper(nextMessagesByPeer, CHAT_HISTORY_MAX_MESSAGES_PER_PEER)
   }, [])
 
   const writeHistory = useCallback(
@@ -520,6 +521,25 @@ export function useChatSocket({
     }
   }, [])
 
+  const clearPendingRetryByClientMessageId = useCallback((clientMessageId: string) => {
+    pendingRetryEventsRef.current = removePendingRetryByClientMessageId(
+      pendingRetryEventsRef.current,
+      clientMessageId,
+    )
+  }, [])
+
+  const failOutgoing = useCallback((params: {
+    messageId?: string
+    clientMessageId?: string
+    reason?: string
+  }) => {
+    if (params.clientMessageId) {
+      clearPendingSendTimeout(params.clientMessageId)
+      clearPendingRetryByClientMessageId(params.clientMessageId)
+    }
+    markOutgoingMessageAsFailed(params)
+  }, [clearPendingRetryByClientMessageId, clearPendingSendTimeout, markOutgoingMessageAsFailed])
+
   const schedulePendingSendTimeout = useCallback((messageId: string, clientMessageId: string) => {
     if (!messageId || !clientMessageId) {
       return
@@ -529,32 +549,19 @@ export function useChatSocket({
 
     pendingSendTimeoutsRef.current[clientMessageId] = setTimeout(() => {
       delete pendingSendTimeoutsRef.current[clientMessageId]
-      markOutgoingMessageAsFailed({
+      failOutgoing({
         messageId,
         clientMessageId,
         reason: "No server response. Please retry.",
       })
     }, SEND_CONFIRM_TIMEOUT_MS)
-  }, [SEND_CONFIRM_TIMEOUT_MS, clearPendingSendTimeout, markOutgoingMessageAsFailed])
-
-  const clearPendingRetryByClientMessageId = useCallback((clientMessageId: string) => {
-    if (!clientMessageId) {
-      return
-    }
-
-    Object.entries(pendingRetryEventsRef.current).forEach(([messageId, event]) => {
-      if (event.type !== "send_message") {
-        return
-      }
-
-      if (event.client_message_id === clientMessageId) {
-        delete pendingRetryEventsRef.current[messageId]
-      }
-    })
-  }, [])
+  }, [SEND_CONFIRM_TIMEOUT_MS, clearPendingSendTimeout, failOutgoing])
 
   const flushPendingRetryEvents = useCallback(() => {
-    if (socketRef.current?.readyState !== WebSocket.OPEN || !isWsRegisteredRef.current) {
+    if (!canSendWsNow(
+      socketRef.current?.readyState === WebSocket.OPEN,
+      isWsRegisteredRef.current,
+    )) {
       return
     }
 
@@ -562,8 +569,9 @@ export function useChatSocket({
     pendingEntries.forEach(([messageId, event]) => {
       const sent = sendEvent(event)
       if (sent) {
-        if (event.type === "send_message" && event.client_message_id) {
-          schedulePendingSendTimeout(messageId, event.client_message_id)
+        const clientMessageId = clientMessageIdFromPendingEvent(event)
+        if (clientMessageId) {
+          schedulePendingSendTimeout(messageId, clientMessageId)
         }
         delete pendingRetryEventsRef.current[messageId]
       }
@@ -854,7 +862,7 @@ export function useChatSocket({
 
         if (data.type === "error") {
           if (data.message_id || data.client_message_id) {
-            markOutgoingMessageAsFailed({
+            failOutgoing({
               messageId: data.message_id,
               clientMessageId: data.client_message_id,
               reason: data.message,
@@ -890,7 +898,7 @@ export function useChatSocket({
     setMessageReactions,
     appendMessage,
     markLatestOutgoingSendingAsFailed,
-    markOutgoingMessageAsFailed,
+    failOutgoing,
     markOutgoingMessageAsDelivered,
     normalizeIncomingMessage,
     scheduleReconnect,
@@ -940,14 +948,17 @@ export function useChatSocket({
             })
           })
 
-          serverMessagePeerRef.current = nextPeerByServerId
-          setMessagesByPeer(hydrated)
+          serverMessagePeerRef.current = {
+            ...serverMessagePeerRef.current,
+            ...nextPeerByServerId,
+          }
+          setMessagesByPeer((prev) => mergeMessagesByPeer(hydrated, prev))
         }
       })
       .catch(() => {
         historyHydratedRef.current = true
         if (!isCancelled) {
-          setMessagesByPeer({})
+          setMessagesByPeer((prev) => (Object.keys(prev).length > 0 ? prev : {}))
         }
       })
 
@@ -1003,6 +1014,12 @@ export function useChatSocket({
       }
 
       const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const eventToSend: WsClientEvent = {
+        type: "send_message",
+        to_user_id: toUserId,
+        text: trimmed,
+        client_message_id: clientMessageId,
+      }
 
       const localMessage: ChatMessage = {
         id: clientMessageId,
@@ -1015,15 +1032,21 @@ export function useChatSocket({
       }
 
       appendMessage(localMessage)
-      const sent = sendEvent({
-        type: "send_message",
-        to_user_id: toUserId,
-        text: trimmed,
-        client_message_id: clientMessageId,
-      })
 
+      const canSendNow = canSendWsNow(
+        socketRef.current?.readyState === WebSocket.OPEN,
+        isWsRegisteredRef.current,
+      )
+      if (!canSendNow) {
+        pendingRetryEventsRef.current[clientMessageId] = eventToSend
+        connectRef.current()
+        schedulePendingSendTimeout(clientMessageId, clientMessageId)
+        return
+      }
+
+      const sent = sendEvent(eventToSend)
       if (!sent) {
-        markOutgoingMessageAsFailed({
+        failOutgoing({
           clientMessageId,
           reason: "Message could not be queued. Please retry.",
         })
@@ -1031,7 +1054,7 @@ export function useChatSocket({
         schedulePendingSendTimeout(clientMessageId, clientMessageId)
       }
     },
-    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId, acceptedFriends],
+    [appendMessage, failOutgoing, schedulePendingSendTimeout, sendEvent, userId, acceptedFriends],
   )
 
   const sendImageMessage = useCallback(
@@ -1066,7 +1089,10 @@ export function useChatSocket({
 
       appendMessage(localMessage)
 
-      const canSendNow = socketRef.current?.readyState === WebSocket.OPEN && isWsRegisteredRef.current
+      const canSendNow = canSendWsNow(
+        socketRef.current?.readyState === WebSocket.OPEN,
+        isWsRegisteredRef.current,
+      )
       if (!canSendNow) {
         pendingRetryEventsRef.current[clientMessageId] = eventToSend
         connectRef.current()
@@ -1076,7 +1102,7 @@ export function useChatSocket({
 
       const sent = sendEvent(eventToSend)
       if (!sent) {
-        markOutgoingMessageAsFailed({
+        failOutgoing({
           clientMessageId,
           reason: "Image could not be queued. Please retry.",
         })
@@ -1084,7 +1110,7 @@ export function useChatSocket({
         schedulePendingSendTimeout(clientMessageId, clientMessageId)
       }
     },
-    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId, acceptedFriends],
+    [appendMessage, failOutgoing, schedulePendingSendTimeout, sendEvent, userId, acceptedFriends],
   )
 
   const sendGroupMessage = useCallback(
@@ -1095,6 +1121,12 @@ export function useChatSocket({
 
       const clientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       const groupConversationId = `group:${normalizedGroupId}`
+      const eventToSend: WsClientEvent = {
+        type: "send_group_message",
+        group_id: normalizedGroupId,
+        text: trimmed,
+        client_message_id: clientMessageId,
+      }
 
       const localMessage: ChatMessage = {
         id: clientMessageId,
@@ -1108,15 +1140,21 @@ export function useChatSocket({
       }
 
       appendMessage(localMessage)
-      const sent = sendEvent({
-        type: "send_group_message",
-        group_id: normalizedGroupId,
-        text: trimmed,
-        client_message_id: clientMessageId,
-      })
 
+      const canSendNow = canSendWsNow(
+        socketRef.current?.readyState === WebSocket.OPEN,
+        isWsRegisteredRef.current,
+      )
+      if (!canSendNow) {
+        pendingRetryEventsRef.current[clientMessageId] = eventToSend
+        connectRef.current()
+        schedulePendingSendTimeout(clientMessageId, clientMessageId)
+        return
+      }
+
+      const sent = sendEvent(eventToSend)
       if (!sent) {
-        markOutgoingMessageAsFailed({
+        failOutgoing({
           clientMessageId,
           reason: "Message could not be queued. Please retry.",
         })
@@ -1124,7 +1162,7 @@ export function useChatSocket({
         schedulePendingSendTimeout(clientMessageId, clientMessageId)
       }
     },
-    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
+    [appendMessage, failOutgoing, schedulePendingSendTimeout, sendEvent, userId],
   )
 
   const sendGroupImageMessage = useCallback(
@@ -1157,7 +1195,10 @@ export function useChatSocket({
 
       appendMessage(localMessage)
 
-      const canSendNow = socketRef.current?.readyState === WebSocket.OPEN && isWsRegisteredRef.current
+      const canSendNow = canSendWsNow(
+        socketRef.current?.readyState === WebSocket.OPEN,
+        isWsRegisteredRef.current,
+      )
       if (!canSendNow) {
         pendingRetryEventsRef.current[clientMessageId] = eventToSend
         connectRef.current()
@@ -1167,7 +1208,7 @@ export function useChatSocket({
 
       const sent = sendEvent(eventToSend)
       if (!sent) {
-        markOutgoingMessageAsFailed({
+        failOutgoing({
           clientMessageId,
           reason: "Image could not be queued. Please retry.",
         })
@@ -1175,7 +1216,7 @@ export function useChatSocket({
         schedulePendingSendTimeout(clientMessageId, clientMessageId)
       }
     },
-    [appendMessage, markOutgoingMessageAsFailed, schedulePendingSendTimeout, sendEvent, userId],
+    [appendMessage, failOutgoing, schedulePendingSendTimeout, sendEvent, userId],
   )
 
   const retryMessage = useCallback((messageId: string) => {
@@ -1253,10 +1294,16 @@ export function useChatSocket({
       return false
     }
 
-    const canSendNow = socketRef.current?.readyState === WebSocket.OPEN && isWsRegisteredRef.current
+    const canSendNow = canSendWsNow(
+      socketRef.current?.readyState === WebSocket.OPEN,
+      isWsRegisteredRef.current,
+    )
     if (!canSendNow) {
       pendingRetryEventsRef.current[retryQueueKey] = eventToSend
       connectRef.current()
+      if (retryClientMessageId) {
+        schedulePendingSendTimeout(retryQueueKey, retryClientMessageId)
+      }
       return true
     }
 
@@ -1264,6 +1311,9 @@ export function useChatSocket({
     if (!sent) {
       pendingRetryEventsRef.current[retryQueueKey] = eventToSend
       connectRef.current()
+      if (retryClientMessageId) {
+        schedulePendingSendTimeout(retryQueueKey, retryClientMessageId)
+      }
       return true
     }
 
