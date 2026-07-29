@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --test utils/identity.test.ts utils/authHydrate.test.ts"
+    "test": "node --experimental-strip-types --test utils/identity.test.ts utils/authHydrate.test.ts utils/messageDelivery.test.ts"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.11.2",
