@@ -1,6 +1,7 @@
 ﻿"use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { isWsAuthError } from "@/utils/authApiError"
 import { CHAT_HISTORY_MAX_MESSAGES_PER_PEER } from "@/utils/chatConfig"
 import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/utils/chatTypes"
 import { canMessagePeer } from "@/utils/identity"
@@ -17,6 +18,7 @@ interface UseChatSocketOptions {
   token: string
   wsUrl: string
   acceptedFriends?: string[]
+  onAuthInvalid?: () => void
 }
 
 export function useChatSocket({
@@ -24,6 +26,7 @@ export function useChatSocket({
   token,
   wsUrl,
   acceptedFriends = [],
+  onAuthInvalid,
 }: UseChatSocketOptions) {
   const MAX_RECONNECT_DELAY_MS = 10000
   /** Small images (~512KB) still need headroom on slow links. */
@@ -47,6 +50,11 @@ export function useChatSocket({
   const pendingRetryEventsRef = useRef<Record<string, WsClientEvent>>({})
   const isWsRegisteredRef = useRef(false)
   const pendingSendTimeoutsRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const onAuthInvalidRef = useRef(onAuthInvalid)
+
+  useEffect(() => {
+    onAuthInvalidRef.current = onAuthInvalid
+  }, [onAuthInvalid])
 
   const normalizeIncomingMessage = useCallback((incoming: Partial<ChatMessage> & Record<string, unknown>): ChatMessage | null => {
     const id = typeof incoming.id === "string" ? incoming.id : ""
@@ -861,6 +869,15 @@ export function useChatSocket({
         }
 
         if (data.type === "error") {
+          if (isWsAuthError(data.message)) {
+            shouldReconnectRef.current = false
+            setError(data.message)
+            console.error("WS auth error:", data.message)
+            onAuthInvalidRef.current?.()
+            ws.close()
+            return
+          }
+
           if (data.message_id || data.client_message_id) {
             failOutgoing({
               messageId: data.message_id,

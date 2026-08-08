@@ -3,10 +3,11 @@ import { useEffect, useRef, useState } from "react"
 import Image from "next/image"
 import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { getUserProfile } from "@/utils/chatApi"
+import { isUnauthorizedError } from "@/utils/authApiError"
 import type { PublicProfile } from "@/utils/chatTypes"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectAuthState } from "@/store/selectors"
-import { resolveChatUsername, resolveDisplayName, updateProfileRequest } from "@/store/features/authSlice"
+import { clearAuthState, resolveChatUsername, resolveDisplayName, updateProfileRequest } from "@/store/features/authSlice"
 
 const MAX_AVATAR_BYTES = 512 * 1024 // 512 KB
 
@@ -243,6 +244,7 @@ type PeerProfileModalProps = {
 }
 
 export function PeerProfileModal({ isOpen, username, token, onClose }: PeerProfileModalProps) {
+  const dispatch = useAppDispatch()
   const [profile, setProfile] = useState<PublicProfile | null>(null)
   const [fetchError, setFetchError] = useState<string | null>(null)
   const [fetchLoading, setFetchLoading] = useState(false)
@@ -266,6 +268,10 @@ export function PeerProfileModal({ isOpen, username, token, onClose }: PeerProfi
         if (!cancelled) setProfile(data)
       })
       .catch((err) => {
+        if (isUnauthorizedError(err)) {
+          dispatch(clearAuthState())
+          return
+        }
         if (!cancelled) setFetchError(err instanceof Error ? err.message : "Failed to load profile")
       })
       .finally(() => {
@@ -275,7 +281,7 @@ export function PeerProfileModal({ isOpen, username, token, onClose }: PeerProfi
     return () => {
       cancelled = true
     }
-  }, [isOpen, username, token])
+  }, [dispatch, isOpen, username, token])
 
   return (
     <GenericModal isOpen={isOpen} title={`${username}'s Profile`} onClose={onClose}>

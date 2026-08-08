@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit"
 import { acceptFriendRequest, fetchAllUsers, fetchFriendSnapshot, removeFriend, sendFriendRequest } from "@/utils/chatApi"
+import { unauthorizedRejectValue } from "@/utils/authApiError"
 import { normalizeIdentity } from "@/utils/identity"
 
 type FriendshipSnapshotData = {
@@ -46,6 +47,10 @@ export const fetchFriendSnapshotRequest = createAsyncThunk<
     const snapshot = await fetchFriendSnapshot(token)
     return normalizeSnapshot(snapshot)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not load friends")
   }
 })
@@ -60,6 +65,10 @@ export const fetchAllUsersRequest = createAsyncThunk<
     const normalizedSelf = normalizeIdentity(displayName || userId)
     return Array.from(new Set(users)).filter((candidate) => normalizeIdentity(candidate) !== normalizedSelf)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not load users")
   }
 })
@@ -74,6 +83,10 @@ export const sendFriendRequestAction = createAsyncThunk<
     const snapshot = await fetchFriendSnapshot(token)
     return normalizeSnapshot(snapshot)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not send friend request")
   }
 })
@@ -88,6 +101,10 @@ export const acceptFriendRequestAction = createAsyncThunk<
     const snapshot = await fetchFriendSnapshot(token)
     return normalizeSnapshot(snapshot)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not accept friend request")
   }
 })
@@ -102,6 +119,10 @@ export const removeFriendAction = createAsyncThunk<
     const snapshot = await fetchFriendSnapshot(token)
     return normalizeSnapshot(snapshot)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not remove friend")
   }
 })

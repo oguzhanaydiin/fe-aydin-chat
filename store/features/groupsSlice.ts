@@ -1,5 +1,6 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit"
 import { addGroupMember, createGroup, fetchGroups, updateGroupMemberPermissions } from "@/utils/chatApi"
+import { unauthorizedRejectValue } from "@/utils/authApiError"
 import type { GroupSummary } from "@/utils/chatTypes"
 
 type GroupsState = {
@@ -22,6 +23,10 @@ export const fetchGroupsRequest = createAsyncThunk<
   try {
     return await fetchGroups(token)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not load groups")
   }
 })
@@ -36,6 +41,10 @@ export const createGroupAction = createAsyncThunk<
     const groups = await fetchGroups(token)
     return { groups, createdGroupId: createdGroup.group_id }
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not create group")
   }
 })
@@ -49,6 +58,10 @@ export const addGroupMemberAction = createAsyncThunk<
     await addGroupMember(token, groupId, username)
     return await fetchGroups(token)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not add member")
   }
 })
@@ -64,6 +77,10 @@ export const grantInvitePermissionAction = createAsyncThunk<
     })
     return await fetchGroups(token)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not update invite permission")
   }
 })
@@ -79,6 +96,10 @@ export const promoteGroupLeaderAction = createAsyncThunk<
     })
     return await fetchGroups(token)
   } catch (err) {
+    const unauthorized = unauthorizedRejectValue(err)
+    if (unauthorized) {
+      return rejectWithValue(unauthorized)
+    }
     return rejectWithValue(err instanceof Error ? err.message : "Could not promote member")
   }
 })
