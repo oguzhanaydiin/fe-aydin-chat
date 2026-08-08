@@ -3,6 +3,7 @@ import authReducer from "@/store/features/authSlice"
 import chatUiReducer from "@/store/features/chatUiSlice"
 import friendshipReducer from "@/store/features/friendshipSlice"
 import groupsReducer from "@/store/features/groupsSlice"
+import { sessionExpiredListener } from "@/store/sessionExpiredListener"
 
 export const makeStore = () => {
   return configureStore({
@@ -12,6 +13,8 @@ export const makeStore = () => {
       friendship: friendshipReducer,
       groups: groupsReducer,
     },
+    middleware: (getDefaultMiddleware) =>
+      getDefaultMiddleware().prepend(sessionExpiredListener.middleware),
   })
 }
 

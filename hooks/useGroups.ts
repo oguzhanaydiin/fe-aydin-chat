@@ -1,8 +1,10 @@
 ﻿import { useCallback, useEffect } from "react"
 import { fetchGroupDetail } from "@/utils/chatApi"
+import { isUnauthorizedError } from "@/utils/authApiError"
 import type { GroupDetail } from "@/utils/chatTypes"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectGroupsState } from "@/store/selectors"
+import { clearAuthState } from "@/store/features/authSlice"
 import {
   addGroupMemberAction,
   createGroupAction,
@@ -131,6 +133,10 @@ export function useGroups({ token, isAuthenticated }: UseGroupsOptions) {
     try {
       return await fetchGroupDetail(token, normalizedGroupId)
     } catch (err) {
+      if (isUnauthorizedError(err)) {
+        dispatch(clearAuthState())
+        return null
+      }
       dispatch(setGroupsError(err instanceof Error ? err.message : "Could not load group details"))
       return null
     }

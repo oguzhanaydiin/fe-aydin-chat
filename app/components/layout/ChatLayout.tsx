@@ -13,6 +13,7 @@ import { useChatActivity } from "@/hooks/useChatActivity"
 import { useImageMessage } from "@/hooks/useImageMessage"
 import { WS_URL, resolveMaxWsTextLength } from "@/utils/chatConfig"
 import { getUserProfile } from "@/utils/chatApi"
+import { isUnauthorizedError } from "@/utils/authApiError"
 import { AddFriendModal } from "@/app/components/ui/modals/AddFriendModal"
 import { ConfirmModal } from "@/app/components/ui/modals/ConfirmModal"
 import { CreateGroupModal } from "@/app/components/ui/modals/CreateGroupModal"
@@ -143,6 +144,9 @@ export function ChatLayout() {
     token,
     wsUrl: WS_URL,
     acceptedFriends: friends,
+    onAuthInvalid: () => {
+      dispatch(clearAuthState())
+    },
   })
 
   const setTargetUser = useCallback((value: string | null) => {
@@ -282,7 +286,10 @@ export function ChatLayout() {
         try {
           const profile = await getUserProfile(token, senderId)
           return [senderId, profile.avatar_data_url ?? null] as const
-        } catch {
+        } catch (err) {
+          if (isUnauthorizedError(err)) {
+            dispatch(clearAuthState())
+          }
           return [senderId, null] as const
         }
       }),
@@ -324,7 +331,7 @@ export function ChatLayout() {
     return () => {
       cancelled = true
     }
-  }, [currentMessages, groupSenderAvatarsByUser, isGroupConversation, token, userId])
+  }, [currentMessages, dispatch, groupSenderAvatarsByUser, isGroupConversation, token, userId])
 
   const openGroupMembersModal = async () => {
     if (!selectedGroup) {

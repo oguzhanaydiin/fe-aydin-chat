@@ -19,6 +19,12 @@ async function readErrorMessage(response: Response, fallback: string): Promise<s
   return message || fallback
 }
 
+async function throwIfNotOk(response: Response, fallback: string): Promise<void> {
+  if (!response.ok) {
+    throw new AuthApiError(response.status, await readErrorMessage(response, fallback))
+  }
+}
+
 export async function requestOtp(email: string): Promise<SendOtpResponse> {
   const response = await fetch(`${API_URL}/otp/send`, {
     method: "POST",
@@ -26,10 +32,7 @@ export async function requestOtp(email: string): Promise<SendOtpResponse> {
     body: JSON.stringify({ email }),
   })
 
-  if (!response.ok) {
-    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to send OTP"))
-  }
-
+  await throwIfNotOk(response, "Failed to send OTP")
   return (await response.json()) as SendOtpResponse
 }
 
@@ -40,10 +43,7 @@ export async function verifyOtp(email: string, otp: string): Promise<AuthSession
     body: JSON.stringify({ email, otp }),
   })
 
-  if (!response.ok) {
-    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to verify OTP"))
-  }
-
+  await throwIfNotOk(response, "Failed to verify OTP")
   return (await response.json()) as AuthSessionResponse
 }
 
@@ -57,10 +57,7 @@ export async function saveUsername(token: string, username: string): Promise<Sav
     body: JSON.stringify({ username }),
   })
 
-  if (!response.ok) {
-    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to save username"))
-  }
-
+  await throwIfNotOk(response, "Failed to save username")
   return (await response.json()) as SaveUsernameResponse
 }
 
@@ -97,11 +94,7 @@ export async function fetchAllUsers(token: string): Promise<string[]> {
     },
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to fetch users")
-  }
-
+  await throwIfNotOk(response, "Failed to fetch users")
   const payload = (await response.json()) as unknown
   return normalizeUsersPayload(payload)
 }
@@ -139,11 +132,7 @@ export async function fetchFriendSnapshot(token: string): Promise<FriendSnapshot
     },
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to fetch friend snapshot")
-  }
-
+  await throwIfNotOk(response, "Failed to fetch friend snapshot")
   const payload = (await response.json()) as unknown
   return normalizeFriendSnapshot(payload)
 }
@@ -158,10 +147,7 @@ export async function sendFriendRequest(token: string, toUsername: string): Prom
     body: JSON.stringify({ to_username: toUsername }),
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to send friend request")
-  }
+  await throwIfNotOk(response, "Failed to send friend request")
 }
 
 export async function acceptFriendRequest(token: string, fromUsername: string): Promise<void> {
@@ -174,10 +160,7 @@ export async function acceptFriendRequest(token: string, fromUsername: string): 
     body: JSON.stringify({ from_username: fromUsername }),
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to accept friend request")
-  }
+  await throwIfNotOk(response, "Failed to accept friend request")
 }
 
 export async function removeFriend(token: string, username: string): Promise<void> {
@@ -188,10 +171,7 @@ export async function removeFriend(token: string, username: string): Promise<voi
     },
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to remove friend")
-  }
+  await throwIfNotOk(response, "Failed to remove friend")
 }
 
 function normalizeGroupSummaryList(payload: unknown): GroupSummary[] {
@@ -222,11 +202,7 @@ export async function fetchGroups(token: string): Promise<GroupSummary[]> {
     },
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to fetch groups")
-  }
-
+  await throwIfNotOk(response, "Failed to fetch groups")
   return normalizeGroupSummaryList(await response.json())
 }
 
@@ -240,11 +216,7 @@ export async function createGroup(token: string, name: string, memberUsernames: 
     body: JSON.stringify({ name, member_usernames: memberUsernames }),
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to create group")
-  }
-
+  await throwIfNotOk(response, "Failed to create group")
   return (await response.json()) as GroupDetail
 }
 
@@ -256,11 +228,7 @@ export async function fetchGroupDetail(token: string, groupId: string): Promise<
     },
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to fetch group details")
-  }
-
+  await throwIfNotOk(response, "Failed to fetch group details")
   return (await response.json()) as GroupDetail
 }
 
@@ -274,10 +242,7 @@ export async function addGroupMember(token: string, groupId: string, username: s
     body: JSON.stringify({ username }),
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to add group member")
-  }
+  await throwIfNotOk(response, "Failed to add group member")
 }
 
 export async function updateGroupMemberPermissions(
@@ -295,10 +260,7 @@ export async function updateGroupMemberPermissions(
     body: JSON.stringify(payload),
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to update group permissions")
-  }
+  await throwIfNotOk(response, "Failed to update group permissions")
 }
 
 export async function getMyProfile(token: string): Promise<UserProfile> {
@@ -306,10 +268,7 @@ export async function getMyProfile(token: string): Promise<UserProfile> {
     headers: { Authorization: `Bearer ${token}` },
   })
 
-  if (!response.ok) {
-    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to fetch profile"))
-  }
-
+  await throwIfNotOk(response, "Failed to fetch profile")
   return (await response.json()) as UserProfile
 }
 
@@ -326,10 +285,7 @@ export async function updateProfile(
     body: JSON.stringify(payload),
   })
 
-  if (!response.ok) {
-    throw new AuthApiError(response.status, await readErrorMessage(response, "Failed to update profile"))
-  }
-
+  await throwIfNotOk(response, "Failed to update profile")
   return (await response.json()) as UserProfile
 }
 
@@ -338,10 +294,6 @@ export async function getUserProfile(token: string, username: string): Promise<P
     headers: { Authorization: `Bearer ${token}` },
   })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(message || "Failed to fetch user profile")
-  }
-
+  await throwIfNotOk(response, "Failed to fetch user profile")
   return (await response.json()) as PublicProfile
 }
