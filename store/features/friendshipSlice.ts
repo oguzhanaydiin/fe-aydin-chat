@@ -1,5 +1,5 @@
 import { createAsyncThunk, createSlice, PayloadAction } from "@reduxjs/toolkit"
-import { acceptFriendRequest, fetchAllUsers, fetchFriendSnapshot, removeFriend, sendFriendRequest } from "@/utils/chatApi"
+import { acceptFriendRequest, fetchFriendSnapshot, removeFriend, sendFriendRequest } from "@/utils/chatApi"
 import { unauthorizedRejectValue } from "@/utils/authApiError"
 import { normalizeIdentity } from "@/utils/identity"
 
@@ -13,9 +13,6 @@ type FriendshipState = FriendshipSnapshotData & {
   friendActionLoading: boolean
   friendActionError: string | null
   isAddUserModalOpen: boolean
-  allUsers: string[]
-  allUsersLoading: boolean
-  allUsersError: string | null
 }
 
 const initialState: FriendshipState = {
@@ -25,9 +22,6 @@ const initialState: FriendshipState = {
   friendActionLoading: false,
   friendActionError: null,
   isAddUserModalOpen: false,
-  allUsers: [],
-  allUsersLoading: false,
-  allUsersError: null,
 }
 
 function normalizeSnapshot(snapshot: { accepted_friends: string[], incoming_requests: string[], outgoing_requests: string[] }): FriendshipSnapshotData {
@@ -52,24 +46,6 @@ export const fetchFriendSnapshotRequest = createAsyncThunk<
       return rejectWithValue(unauthorized)
     }
     return rejectWithValue(err instanceof Error ? err.message : "Could not load friends")
-  }
-})
-
-export const fetchAllUsersRequest = createAsyncThunk<
-  string[],
-  { token: string, userId: string, displayName: string },
-  { rejectValue: string }
->("friendship/fetchAllUsersRequest", async ({ token, userId, displayName }, { rejectWithValue }) => {
-  try {
-    const users = await fetchAllUsers(token)
-    const normalizedSelf = normalizeIdentity(displayName || userId)
-    return Array.from(new Set(users)).filter((candidate) => normalizeIdentity(candidate) !== normalizedSelf)
-  } catch (err) {
-    const unauthorized = unauthorizedRejectValue(err)
-    if (unauthorized) {
-      return rejectWithValue(unauthorized)
-    }
-    return rejectWithValue(err instanceof Error ? err.message : "Could not load users")
   }
 })
 
@@ -137,9 +113,6 @@ const friendshipSlice = createSlice({
     clearFriendActionError(state) {
       state.friendActionError = null
     },
-    clearAllUsersError(state) {
-      state.allUsersError = null
-    },
     resetFriendshipState() {
       return initialState
     },
@@ -153,19 +126,6 @@ const friendshipSlice = createSlice({
       })
       .addCase(fetchFriendSnapshotRequest.rejected, (state, action) => {
         state.friendActionError = action.payload ?? "Could not load friends"
-      })
-      .addCase(fetchAllUsersRequest.pending, (state) => {
-        state.allUsersLoading = true
-        state.allUsersError = null
-      })
-      .addCase(fetchAllUsersRequest.fulfilled, (state, action) => {
-        state.allUsersLoading = false
-        state.allUsers = action.payload
-      })
-      .addCase(fetchAllUsersRequest.rejected, (state, action) => {
-        state.allUsersLoading = false
-        state.allUsers = []
-        state.allUsersError = action.payload ?? "Could not load users"
       })
       .addCase(sendFriendRequestAction.pending, (state) => {
         state.friendActionLoading = true
@@ -216,7 +176,6 @@ const friendshipSlice = createSlice({
 export const {
   setAddUserModalOpen,
   clearFriendActionError,
-  clearAllUsersError,
   resetFriendshipState,
 } = friendshipSlice.actions
 

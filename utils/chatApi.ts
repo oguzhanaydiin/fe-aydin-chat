@@ -8,7 +8,6 @@ import type {
   SaveUsernameResponse,
   SendOtpResponse,
   UpdateProfilePayload,
-  UserDirectoryEntry,
   UserProfile,
 } from "@/utils/chatTypes"
 
@@ -59,44 +58,6 @@ export async function saveUsername(token: string, username: string): Promise<Sav
 
   await throwIfNotOk(response, "Failed to save username")
   return (await response.json()) as SaveUsernameResponse
-}
-
-function normalizeUsersPayload(payload: unknown): string[] {
-  const rawItems: unknown[] = Array.isArray(payload)
-    ? payload
-    : (payload && typeof payload === "object" && Array.isArray((payload as { users?: unknown[] }).users)
-      ? (payload as { users: unknown[] }).users
-      : [])
-
-  const mapped = rawItems
-    .map((entry) => {
-      if (typeof entry === "string") {
-        return entry
-      }
-
-      if (!entry || typeof entry !== "object") {
-        return ""
-      }
-
-      const user = entry as UserDirectoryEntry
-      return (user.username || user.user_id || user.email || "").trim()
-    })
-    .filter((item): item is string => Boolean(item))
-
-  return Array.from(new Set(mapped))
-}
-
-export async function fetchAllUsers(token: string): Promise<string[]> {
-  const response = await fetch(`${API_URL}/users`, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  })
-
-  await throwIfNotOk(response, "Failed to fetch users")
-  const payload = (await response.json()) as unknown
-  return normalizeUsersPayload(payload)
 }
 
 function normalizeFriendSnapshot(payload: unknown): FriendSnapshot {
