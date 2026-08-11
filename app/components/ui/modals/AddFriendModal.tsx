@@ -1,16 +1,16 @@
+"use client"
+
+import { FormEvent, useState } from "react"
 import { GenericModal } from "@/app/components/ui/modals/GenericModal"
 import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectAuthState, selectFriendshipState } from "@/store/selectors"
-import { sendFriendRequestAction } from "@/store/features/friendshipSlice"
+import { clearFriendActionError, sendFriendRequestAction } from "@/store/features/friendshipSlice"
 import { resolveChatUsername, resolveDisplayName } from "@/store/features/authSlice"
+import { normalizeIdentity } from "@/utils/identity"
 
 type AddFriendModalProps = {
   isOpen: boolean
   onClose: () => void
-}
-
-function normalizeIdentity(value: string) {
-  return value.trim().toLowerCase()
 }
 
 export function AddFriendModal({
@@ -20,102 +20,111 @@ export function AddFriendModal({
   const dispatch = useAppDispatch()
   const { authSession } = useAppSelector(selectAuthState)
   const {
-    allUsers,
     friends,
     incomingRequests,
     outgoingRequests,
-    allUsersLoading,
-    allUsersError,
     friendActionLoading,
     friendActionError,
   } = useAppSelector(selectFriendshipState)
 
+  const [usernameInput, setUsernameInput] = useState("")
+  const [localError, setLocalError] = useState<string | null>(null)
+
   const displayName = resolveDisplayName(authSession)
   const userId = resolveChatUsername(authSession)
   const token = authSession?.token || ""
+  const normalizedSelf = normalizeIdentity(displayName || userId)
 
-  const normalizedDisplayName = normalizeIdentity(displayName)
-  const normalizedUserId = normalizeIdentity(userId)
+  const onSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    setLocalError(null)
+    dispatch(clearFriendActionError())
 
-  const visibleFriends = friends.filter((friend) => {
-    const normalized = normalizeIdentity(friend)
-    return normalized && normalized !== normalizedDisplayName && normalized !== normalizedUserId
-  })
+    if (!token) {
+      return
+    }
 
-  const incomingSet = new Set(incomingRequests.map((candidate) => normalizeIdentity(candidate)))
-  const outgoingSet = new Set(outgoingRequests.map((candidate) => normalizeIdentity(candidate)))
-
-  const addableUsers = allUsers.filter((candidate) => {
+    const candidate = usernameInput.trim()
     const normalizedCandidate = normalizeIdentity(candidate)
     if (!normalizedCandidate) {
-      return false
+      setLocalError("Enter a username.")
+      return
     }
 
-    if (normalizedCandidate === normalizedDisplayName || normalizedCandidate === normalizedUserId) {
-      return false
+    if (normalizedCandidate === normalizedSelf) {
+      setLocalError("You cannot add yourself.")
+      return
     }
 
-    const isFriend = visibleFriends.some((friend) => normalizeIdentity(friend) === normalizedCandidate)
+    if (friends.some((friend) => normalizeIdentity(friend) === normalizedCandidate)) {
+      setLocalError("You are already friends.")
+      return
+    }
 
-    return !isFriend
-  })
+    if (outgoingRequests.some((name) => normalizeIdentity(name) === normalizedCandidate)) {
+      setLocalError("Friend request already sent.")
+      return
+    }
+
+    if (incomingRequests.some((name) => normalizeIdentity(name) === normalizedCandidate)) {
+      setLocalError("This user already sent you a request. Accept it from your friends list.")
+      return
+    }
+
+    const action = await dispatch(sendFriendRequestAction({ token, friendId: candidate }))
+    if (sendFriendRequestAction.fulfilled.match(action)) {
+      setUsernameInput("")
+    }
+  }
+
+  const handleClose = () => {
+    setUsernameInput("")
+    setLocalError(null)
+    dispatch(clearFriendActionError())
+    onClose()
+  }
+
+  const errorMessage = localError || friendActionError
 
   return (
     <GenericModal
       isOpen={isOpen}
       title="Add Friend"
-      onClose={onClose}
+      onClose={handleClose}
       panelClassName="max-w-lg"
-      bodyClassName="min-h-[320px]"
     >
-      {allUsersLoading && <p className="pt-2 text-sm text-gray-400">Loading users...</p>}
+      <form onSubmit={onSubmit} className="flex flex-col gap-3 pt-1">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-sm text-gray-300">Username</span>
+          <input
+            type="text"
+            value={usernameInput}
+            onChange={(event) => {
+              setUsernameInput(event.target.value)
+              if (localError) {
+                setLocalError(null)
+              }
+            }}
+            placeholder="Enter exact username"
+            autoComplete="off"
+            className="rounded-md border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-100 outline-none focus:border-blue-500"
+          />
+        </label>
 
-      {!allUsersLoading && friendActionError && (
-        <p className="mb-3 rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{friendActionError}</p>
-      )}
+        {errorMessage && (
+          <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">
+            {errorMessage}
+          </p>
+        )}
 
-      {!allUsersLoading && allUsersError && (
-        <p className="rounded-md border border-red-900 bg-red-950 px-3 py-2 text-sm text-red-300">{allUsersError}</p>
-      )}
-
-      {!allUsersLoading && !allUsersError && addableUsers.length === 0 && (
-        <p className="pt-2 text-sm text-gray-400">No users available to add right now.</p>
-      )}
-
-      {!allUsersLoading && !allUsersError && addableUsers.length > 0 && (
-        <div className="h-72 space-y-2 overflow-y-auto pr-1">
-          {addableUsers.map((candidate) => (
-            <div key={candidate} className="flex items-center justify-between gap-3 rounded-lg border border-gray-700 bg-gray-800 px-3 py-2">
-              <span className="truncate text-sm text-gray-100">{candidate}</span>
-
-              {incomingSet.has(normalizeIdentity(candidate)) ? (
-                <span className="rounded-md border border-amber-500/40 bg-amber-900/40 px-2 py-1 text-xs font-semibold text-amber-200">
-                  Incoming request
-                </span>
-              ) : outgoingSet.has(normalizeIdentity(candidate)) ? (
-                <span className="rounded-md border border-blue-500/40 bg-blue-900/40 px-2 py-1 text-xs font-semibold text-blue-200">
-                  Request sent
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  disabled={friendActionLoading}
-                  onClick={() => {
-                    if (!token) {
-                      return
-                    }
-
-                    void dispatch(sendFriendRequestAction({ token, friendId: candidate }))
-                  }}
-                  className="rounded-md bg-emerald-600 px-2 py-1 text-xs font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-emerald-500"
-                >
-                  Send Request
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+        <button
+          type="submit"
+          disabled={friendActionLoading}
+          className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-semibold hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {friendActionLoading ? "Sending..." : "Send Request"}
+        </button>
+      </form>
     </GenericModal>
   )
 }

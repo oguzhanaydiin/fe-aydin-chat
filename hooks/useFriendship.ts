@@ -5,7 +5,6 @@ import { useAppDispatch, useAppSelector } from "@/store/hooks"
 import { selectFriendshipState } from "@/store/selectors"
 import {
   acceptFriendRequestAction,
-  fetchAllUsersRequest,
   fetchFriendSnapshotRequest,
   removeFriendAction,
   resetFriendshipState as resetFriendshipStateAction,
@@ -42,9 +41,6 @@ export function useFriendship({
     friendActionLoading,
     friendActionError,
     isAddUserModalOpen,
-    allUsers,
-    allUsersLoading,
-    allUsersError,
   } = useAppSelector(selectFriendshipState)
 
   const knownAcceptedFriendsRef = useRef<Set<string>>(new Set())
@@ -96,13 +92,12 @@ export function useFriendship({
     void dispatch(fetchFriendSnapshotRequest(token))
   }, [dispatch, wsStatus, token])
 
-  const onOpenAddUserModal = async () => {
+  const onOpenAddUserModal = () => {
     if (!token) {
       return
     }
 
     dispatch(setAddUserModalOpen(true))
-    await dispatch(fetchAllUsersRequest({ token, userId, displayName }))
   }
 
   const onCloseAddUserModal = () => {
@@ -178,9 +173,6 @@ export function useFriendship({
     friendActionLoading,
     friendActionError,
     isAddUserModalOpen,
-    allUsers,
-    allUsersLoading,
-    allUsersError,
     onOpenAddUserModal,
     onCloseAddUserModal,
     onSendFriendRequest,

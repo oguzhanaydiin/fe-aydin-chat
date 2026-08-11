@@ -45,12 +45,6 @@ export interface SaveUsernameResponse {
   username: string
 }
 
-export interface UserDirectoryEntry {
-  user_id?: string | null
-  username?: string | null
-  email?: string | null
-}
-
 export interface FriendSnapshot {
   accepted_friends: string[]
   incoming_requests: string[]
