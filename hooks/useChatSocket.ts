@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { isWsAuthError } from "@/utils/authApiError"
-import { CHAT_HISTORY_MAX_MESSAGES_PER_PEER } from "@/utils/chatConfig"
+import { readHistory, writeHistory } from "@/utils/chatHistoryDb"
+import { normalizeIncomingMessage, normalizeReactions } from "@/utils/chatMessageNormalize"
 import { ChatMessage, ConnectionStatus, WsClientEvent, WsServerEvent } from "@/utils/chatTypes"
 import { canMessagePeer } from "@/utils/identity"
 import {
@@ -10,8 +11,19 @@ import {
   clearPendingRetryByClientMessageId as removePendingRetryByClientMessageId,
   clientMessageIdFromPendingEvent,
   mergeMessagesByPeer,
-  pruneHistoryForStorage as pruneHistoryForStorageHelper,
 } from "@/utils/messageDelivery"
+import {
+  appendMessageToPeer,
+  applyLatestOutgoingSendingFailed,
+  applyMessageQueued,
+  applyOutgoingDelivered,
+  applyOutgoingFailed,
+  dmInboxAckIds,
+  groupInboxAckIds,
+  peerIdForMessage,
+  planFailedMessageRetry,
+  type StatusUpdateResult,
+} from "@/utils/messageStatus"
 
 interface UseChatSocketOptions {
   userId: string
@@ -31,8 +43,6 @@ export function useChatSocket({
   const MAX_RECONNECT_DELAY_MS = 10000
   /** Small images (~512KB) still need headroom on slow links. */
   const SEND_CONFIRM_TIMEOUT_MS = 20000
-  const CHAT_HISTORY_DB_NAME = "chat_history_db"
-  const CHAT_HISTORY_STORE_NAME = "histories"
 
   const [onlineUsers, setOnlineUsers] = useState<string[]>([])
   const [messagesByPeer, setMessagesByPeer] = useState<Record<string, ChatMessage[]>>({})
@@ -56,89 +66,20 @@ export function useChatSocket({
     onAuthInvalidRef.current = onAuthInvalid
   }, [onAuthInvalid])
 
-  const normalizeIncomingMessage = useCallback((incoming: Partial<ChatMessage> & Record<string, unknown>): ChatMessage | null => {
-    const id = typeof incoming.id === "string" ? incoming.id : ""
-    const groupId = typeof incoming.group_id === "string" ? incoming.group_id.trim().toLowerCase() : ""
-    const fromUserId = typeof incoming.from_user_id === "string"
-      ? incoming.from_user_id
-      : (typeof incoming.from_username === "string" ? incoming.from_username : "")
-    const toUserId = typeof incoming.to_user_id === "string"
-      ? incoming.to_user_id
-      : (typeof incoming.to_username === "string" ? incoming.to_username : (groupId ? `group:${groupId}` : ""))
-    const createdAt = typeof incoming.created_at === "string" ? incoming.created_at : new Date().toISOString()
-    const text = typeof incoming.text === "string" ? incoming.text : ""
-    const imageDataUrl = typeof incoming.image_data_url === "string" && incoming.image_data_url.trim()
-      ? incoming.image_data_url.trim()
-      : undefined
-    const reactions = (() => {
-      const rawReactions = incoming.reactions
-      if (!rawReactions || typeof rawReactions !== "object" || Array.isArray(rawReactions)) {
-        return undefined
-      }
-
-      const normalized: Record<string, string[]> = {}
-      Object.entries(rawReactions as Record<string, unknown>).forEach(([reaction, users]) => {
-        if (!reaction.trim() || !Array.isArray(users)) {
-          return
-        }
-
-        const normalizedUsers = users
-          .filter((entry): entry is string => typeof entry === "string")
-          .map((entry) => entry.trim().toLowerCase())
-          .filter((entry) => entry.length > 0)
-
-        if (normalizedUsers.length > 0) {
-          normalized[reaction] = normalizedUsers
-        }
-      })
-
-      return Object.keys(normalized).length > 0 ? normalized : undefined
-    })()
-    const clientMessageId = typeof incoming.client_message_id === "string" ? incoming.client_message_id : undefined
-    const deliveryStatus = incoming.delivery_status === "sending"
-      || incoming.delivery_status === "sent"
-      || incoming.delivery_status === "delivered"
-      || incoming.delivery_status === "failed"
-      ? incoming.delivery_status
-      : undefined
-    const errorMessage = typeof incoming.error_message === "string" ? incoming.error_message : undefined
-
-    if (!id || !fromUserId || (!toUserId && !groupId)) {
-      return null
-    }
-
-    return {
-      id,
-      from_user_id: fromUserId,
-      to_user_id: toUserId || `group:${groupId}`,
-      text,
-      group_id: groupId || undefined,
-      image_data_url: imageDataUrl,
-      reactions,
-      created_at: createdAt,
-      client_message_id: clientMessageId,
-      delivery_status: deliveryStatus,
-      error_message: errorMessage,
-    }
+  const applyStatusUpdate = useCallback((result: StatusUpdateResult) => {
+    Object.entries(result.peerMapUpdates).forEach(([messageId, peerId]) => {
+      serverMessagePeerRef.current[messageId] = peerId
+    })
+    result.peerMapDeletes.forEach((messageId) => {
+      delete serverMessagePeerRef.current[messageId]
+    })
+    return result.messagesByPeer
   }, [])
 
   const setMessageReactions = useCallback((messageId: string, reactions: Record<string, string[]>) => {
     if (!messageId) return
 
-    const normalizedReactions: Record<string, string[]> = {}
-    Object.entries(reactions).forEach(([reaction, users]) => {
-      if (!reaction.trim()) {
-        return
-      }
-
-      const normalizedUsers = users
-        .map((username) => username.trim().toLowerCase())
-        .filter((username) => username.length > 0)
-
-      if (normalizedUsers.length > 0) {
-        normalizedReactions[reaction] = normalizedUsers
-      }
-    })
+    const normalizedReactions = normalizeReactions(reactions) ?? {}
 
     setMessagesByPeer((prev) => {
       let changed = false
@@ -236,274 +177,29 @@ export function useChatSocket({
   }, [])
 
   const markOutgoingMessageAsDelivered = useCallback((messageId: string, clientMessageId?: string) => {
-    if (!messageId && !clientMessageId) return
-
     setMessagesByPeer((prev) => {
-      let changed = false
-      const next: Record<string, ChatMessage[]> = { ...prev }
-
-      const peerId = serverMessagePeerRef.current[messageId]
-
-      if (peerId) {
-        const messages = next[peerId] || []
-        let peerChanged = false
-
-        const updatedMessages = messages.map((msg) => {
-          if (msg.id === messageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
-            peerChanged = true
-            changed = true
-            return { ...msg, delivery_status: "delivered" as const, error_message: undefined }
-          }
-
-          return msg
-        })
-
-        if (peerChanged) {
-          next[peerId] = updatedMessages
-        }
-      } else if (clientMessageId) {
-        Object.entries(prev).forEach(([currentPeerId, messages]) => {
-          let peerChanged = false
-          const hasServerMessageAlready = messages.some((msg) => msg.id === messageId)
-
-          const updatedMessages = messages.flatMap((msg) => {
-            if (msg.id === clientMessageId && msg.from_user_id === userId && msg.delivery_status !== "delivered") {
-              if (hasServerMessageAlready) {
-                peerChanged = true
-                changed = true
-                return []
-              }
-
-              peerChanged = true
-              changed = true
-              serverMessagePeerRef.current[messageId] = currentPeerId
-
-              return [{
-                ...msg,
-                id: messageId,
-                client_message_id: clientMessageId,
-                delivery_status: "delivered" as const,
-                error_message: undefined,
-              }]
-            }
-
-            return [msg]
-          })
-
-          if (peerChanged) {
-            next[currentPeerId] = updatedMessages
-          }
-        })
-      }
-
-      return changed ? next : prev
+      const result = applyOutgoingDelivered(
+        prev,
+        serverMessagePeerRef.current,
+        userId,
+        messageId,
+        clientMessageId,
+      )
+      return applyStatusUpdate(result)
     })
-  }, [userId])
+  }, [applyStatusUpdate, userId])
 
   const markOutgoingMessageAsFailed = useCallback((params: { messageId?: string, clientMessageId?: string, reason?: string }) => {
-    const { messageId, clientMessageId, reason } = params
-    if (!messageId && !clientMessageId) return
-
-    const normalizedReason = reason?.trim()
-
-    setMessagesByPeer((prev) => {
-      let changed = false
-      const next: Record<string, ChatMessage[]> = { ...prev }
-
-      Object.entries(prev).forEach(([peerId, messages]) => {
-        let peerChanged = false
-
-        const updatedMessages = messages.map((msg) => {
-          const isTargetMessage = (messageId && msg.id === messageId)
-            || (clientMessageId && (msg.id === clientMessageId || msg.client_message_id === clientMessageId))
-
-          if (!isTargetMessage || msg.from_user_id !== userId) {
-            return msg
-          }
-
-          if (msg.delivery_status === "failed" && msg.error_message === normalizedReason) {
-            return msg
-          }
-
-          changed = true
-          peerChanged = true
-
-          return {
-            ...msg,
-            delivery_status: "failed" as const,
-            error_message: normalizedReason,
-          }
-        })
-
-        if (peerChanged) {
-          next[peerId] = updatedMessages
-        }
-      })
-
-      return changed ? next : prev
-    })
-  }, [userId])
+    setMessagesByPeer((prev) => applyStatusUpdate(applyOutgoingFailed(prev, userId, params)))
+  }, [applyStatusUpdate, userId])
 
   const markLatestOutgoingSendingAsFailed = useCallback((reason?: string) => {
-    const normalizedReason = reason?.trim()
-
-    setMessagesByPeer((prev) => {
-      let latestPeerId: string | null = null
-      let latestIndex = -1
-      let latestTimestamp = 0
-
-      Object.entries(prev).forEach(([peerId, messages]) => {
-        messages.forEach((msg, index) => {
-          if (msg.from_user_id !== userId || msg.delivery_status !== "sending") {
-            return
-          }
-
-          const timestamp = Date.parse(msg.created_at)
-          const sortableTimestamp = Number.isNaN(timestamp) ? 0 : timestamp
-          if (sortableTimestamp >= latestTimestamp) {
-            latestTimestamp = sortableTimestamp
-            latestPeerId = peerId
-            latestIndex = index
-          }
-        })
-      })
-
-      if (!latestPeerId || latestIndex < 0) {
-        return prev
-      }
-
-      const targetMessages = prev[latestPeerId]
-      const targetMessage = targetMessages[latestIndex]
-      if (!targetMessage) {
-        return prev
-      }
-
-      const nextMessages = [...targetMessages]
-      nextMessages[latestIndex] = {
-        ...targetMessage,
-        delivery_status: "failed",
-        error_message: normalizedReason,
-      }
-
-      return {
-        ...prev,
-        [latestPeerId]: nextMessages,
-      }
-    })
-  }, [userId])
-
-  const openHistoryDb = useCallback(() => {
-    return new Promise<IDBDatabase>((resolve, reject) => {
-      if (typeof window === "undefined" || !("indexedDB" in window)) {
-        reject(new Error("IndexedDB is not available"))
-        return
-      }
-
-      const request = window.indexedDB.open(CHAT_HISTORY_DB_NAME, 1)
-
-      request.onupgradeneeded = () => {
-        const db = request.result
-        if (!db.objectStoreNames.contains(CHAT_HISTORY_STORE_NAME)) {
-          db.createObjectStore(CHAT_HISTORY_STORE_NAME, { keyPath: "userId" })
-        }
-      }
-
-      request.onsuccess = () => {
-        resolve(request.result)
-      }
-
-      request.onerror = () => {
-        reject(request.error ?? new Error("Failed to open IndexedDB"))
-      }
-    })
-  }, [CHAT_HISTORY_DB_NAME, CHAT_HISTORY_STORE_NAME])
-
-  const readHistory = useCallback(
-    async (currentUserId: string) => {
-      const db = await openHistoryDb()
-
-      return await new Promise<Record<string, ChatMessage[]> | null>((resolve, reject) => {
-        const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readonly")
-        const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
-        const request = store.get(currentUserId)
-
-        request.onsuccess = () => {
-          const record = request.result as { userId: string, messagesByPeer: Record<string, ChatMessage[]> } | undefined
-          resolve(record?.messagesByPeer ?? null)
-        }
-
-        request.onerror = () => {
-          reject(request.error ?? new Error("Failed to read history"))
-        }
-
-        tx.oncomplete = () => {
-          db.close()
-        }
-
-        tx.onabort = () => {
-          reject(tx.error ?? new Error("Read transaction aborted"))
-          db.close()
-        }
-      })
-    },
-    [CHAT_HISTORY_STORE_NAME, openHistoryDb],
-  )
-
-  const pruneHistoryForStorage = useCallback((nextMessagesByPeer: Record<string, ChatMessage[]>) => {
-    // Keep image payloads in IndexedDB (client-owned history); only cap count.
-    return pruneHistoryForStorageHelper(nextMessagesByPeer, CHAT_HISTORY_MAX_MESSAGES_PER_PEER)
-  }, [])
-
-  const writeHistory = useCallback(
-    async (currentUserId: string, nextMessagesByPeer: Record<string, ChatMessage[]>) => {
-      const db = await openHistoryDb()
-      const messagesByPeer = pruneHistoryForStorage(nextMessagesByPeer)
-
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readwrite")
-        const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
-        store.put({
-          userId: currentUserId,
-          messagesByPeer,
-          updatedAt: Date.now(),
-        })
-
-        tx.oncomplete = () => {
-          db.close()
-          resolve()
-        }
-
-        tx.onerror = () => {
-          reject(tx.error ?? new Error("Failed to persist history"))
-          db.close()
-        }
-
-        tx.onabort = () => {
-          reject(tx.error ?? new Error("Write transaction aborted"))
-          db.close()
-        }
-      })
-    },
-    [CHAT_HISTORY_STORE_NAME, openHistoryDb, pruneHistoryForStorage],
-  )
+    setMessagesByPeer((prev) => applyStatusUpdate(applyLatestOutgoingSendingFailed(prev, userId, reason)))
+  }, [applyStatusUpdate, userId])
 
   const appendMessage = useCallback(
     (incoming: ChatMessage) => {
-      const peerId = incoming.group_id
-        ? `group:${incoming.group_id}`
-        : (incoming.from_user_id === userId ? incoming.to_user_id : incoming.from_user_id)
-
-      setMessagesByPeer((prev) => {
-        const existing = prev[peerId] || []
-        if (existing.some((m) => m.id === incoming.id)) {
-          return prev
-        }
-
-        return {
-          ...prev,
-          [peerId]: [...existing, incoming],
-        }
-      })
+      setMessagesByPeer((prev) => appendMessageToPeer(prev, incoming, userId))
     },
     [userId],
   )
@@ -647,19 +343,15 @@ export function useChatSocket({
         }
 
         if (data.type === "inbox") {
-          const receivedIds: string[] = []
-          data.messages.forEach((msg) => {
-            const normalized = normalizeIncomingMessage(msg as Partial<ChatMessage> & Record<string, unknown>)
-            if (!normalized) {
-              return
-            }
+          const normalizedMessages = data.messages
+            .map((msg) => normalizeIncomingMessage(msg as Partial<ChatMessage> & Record<string, unknown>))
+            .filter((msg): msg is ChatMessage => Boolean(msg))
 
+          normalizedMessages.forEach((normalized) => {
             appendMessage(normalized)
-            if (normalized.to_user_id === userId) {
-              receivedIds.push(normalized.id)
-            }
           })
 
+          const receivedIds = dmInboxAckIds(normalizedMessages, userId)
           if (receivedIds.length > 0) {
             sendEvent({ type: "ack", message_ids: receivedIds })
           }
@@ -667,17 +359,15 @@ export function useChatSocket({
         }
 
         if (data.type === "group_inbox") {
-          const receivedIds: string[] = []
-          data.messages.forEach((msg) => {
-            const normalized = normalizeIncomingMessage(msg as Partial<ChatMessage> & Record<string, unknown>)
-            if (!normalized) {
-              return
-            }
+          const normalizedMessages = data.messages
+            .map((msg) => normalizeIncomingMessage(msg as Partial<ChatMessage> & Record<string, unknown>))
+            .filter((msg): msg is ChatMessage => Boolean(msg))
 
+          normalizedMessages.forEach((normalized) => {
             appendMessage(normalized)
-            receivedIds.push(normalized.id)
           })
 
+          const receivedIds = groupInboxAckIds(normalizedMessages)
           if (receivedIds.length > 0) {
             sendEvent({ type: "ack_group", message_ids: receivedIds })
           }
@@ -696,8 +386,7 @@ export function useChatSocket({
           })
 
           if (normalized.from_user_id === userId) {
-            const peerId = normalized.to_user_id
-            serverMessagePeerRef.current[normalized.id] = peerId
+            serverMessagePeerRef.current[normalized.id] = peerIdForMessage(normalized, userId)
           }
 
           if (normalized.to_user_id === userId) {
@@ -718,8 +407,7 @@ export function useChatSocket({
           })
 
           if (normalized.from_user_id === userId) {
-            const peerId = normalized.group_id ? `group:${normalized.group_id}` : normalized.to_user_id
-            serverMessagePeerRef.current[normalized.id] = peerId
+            serverMessagePeerRef.current[normalized.id] = peerIdForMessage(normalized, userId)
           }
 
           sendEvent({ type: "ack_group", message_ids: [normalized.id] })
@@ -741,50 +429,13 @@ export function useChatSocket({
             return
           }
 
-          clearPendingSendTimeout(data.client_message_id)
-          clearPendingRetryByClientMessageId(data.client_message_id)
+          const clientMessageId = data.client_message_id
+          clearPendingSendTimeout(clientMessageId)
+          clearPendingRetryByClientMessageId(clientMessageId)
 
-          setMessagesByPeer((prev) => {
-            let changed = false
-            const next: Record<string, ChatMessage[]> = { ...prev }
-
-            Object.entries(prev).forEach(([peerId, messages]) => {
-              let peerChanged = false
-              const hasServerMessageAlready = messages.some((msg) => msg.id === data.message_id)
-
-              const updatedMessages = messages.flatMap((msg) => {
-                const matchesQueuedMessage = msg.id === data.client_message_id
-                  || msg.client_message_id === data.client_message_id
-
-                if (!matchesQueuedMessage) {
-                  return [msg]
-                }
-
-                if (hasServerMessageAlready) {
-                  peerChanged = true
-                  changed = true
-                  return []
-                }
-
-                peerChanged = true
-                changed = true
-                serverMessagePeerRef.current[data.message_id] = peerId
-
-                return [{
-                  ...msg,
-                  id: data.message_id,
-                  delivery_status: "sent" as const,
-                  error_message: undefined,
-                }]
-              })
-
-              if (peerChanged) {
-                next[peerId] = updatedMessages
-              }
-            })
-
-            return changed ? next : prev
-          })
+          setMessagesByPeer((prev) => applyStatusUpdate(
+            applyMessageQueued(prev, data.message_id, clientMessageId),
+          ))
           return
         }
 
@@ -801,54 +452,15 @@ export function useChatSocket({
             return
           }
 
-          const normalizedQueuedGroupId = data.group_id.trim().toLowerCase()
+          const clientMessageId = data.client_message_id
+          clearPendingSendTimeout(clientMessageId)
+          clearPendingRetryByClientMessageId(clientMessageId)
 
-          clearPendingSendTimeout(data.client_message_id)
-          clearPendingRetryByClientMessageId(data.client_message_id)
-
-          setMessagesByPeer((prev) => {
-            let changed = false
-            const next: Record<string, ChatMessage[]> = { ...prev }
-
-            Object.entries(prev).forEach(([peerId, messages]) => {
-              let peerChanged = false
-              const hasServerMessageAlready = messages.some((msg) => msg.id === data.message_id)
-
-              const updatedMessages = messages.flatMap((msg) => {
-                const matchesQueuedMessage = msg.id === data.client_message_id
-                  || msg.client_message_id === data.client_message_id
-
-                if (!matchesQueuedMessage) {
-                  return [msg]
-                }
-
-                if (hasServerMessageAlready) {
-                  peerChanged = true
-                  changed = true
-                  return []
-                }
-
-                peerChanged = true
-                changed = true
-                serverMessagePeerRef.current[data.message_id] = peerId
-
-                return [{
-                  ...msg,
-                  id: data.message_id,
-                  group_id: normalizedQueuedGroupId,
-                  to_user_id: `group:${normalizedQueuedGroupId}`,
-                  delivery_status: "sent" as const,
-                  error_message: undefined,
-                }]
-              })
-
-              if (peerChanged) {
-                next[peerId] = updatedMessages
-              }
-            })
-
-            return changed ? next : prev
-          })
+          setMessagesByPeer((prev) => applyStatusUpdate(
+            applyMessageQueued(prev, data.message_id, clientMessageId, {
+              groupId: data.group_id,
+            }),
+          ))
           return
         }
 
@@ -917,7 +529,7 @@ export function useChatSocket({
     markLatestOutgoingSendingAsFailed,
     failOutgoing,
     markOutgoingMessageAsDelivered,
-    normalizeIncomingMessage,
+    applyStatusUpdate,
     scheduleReconnect,
     clearPendingSendTimeout,
     clearPendingRetryByClientMessageId,
@@ -982,7 +594,7 @@ export function useChatSocket({
     return () => {
       isCancelled = true
     }
-  }, [readHistory, userId])
+  }, [userId])
 
   useEffect(() => {
     if (!userId || !historyHydratedRef.current) {
@@ -992,7 +604,7 @@ export function useChatSocket({
     void writeHistory(userId, messagesByPeer).catch(() => {
       // Ignore storage failures and keep chat usable.
     })
-  }, [messagesByPeer, userId, writeHistory])
+  }, [messagesByPeer, userId])
 
   useEffect(() => {
     shouldReconnectRef.current = true
@@ -1242,72 +854,35 @@ export function useChatSocket({
       return false
     }
 
+    const newClientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     let eventToSend: WsClientEvent | null = null
-    let retried = false
     let retryQueueKey = normalizedMessageId
     let retryClientMessageId = ""
 
     setMessagesByPeer((prev) => {
-      const next: Record<string, ChatMessage[]> = { ...prev }
-
-      for (const [peerId, messages] of Object.entries(prev)) {
-        const targetIndex = messages.findIndex((msg) => msg.id === normalizedMessageId)
-        if (targetIndex < 0) {
-          continue
-        }
-
-        const target = messages[targetIndex]
-        if (target.from_user_id !== userId || target.delivery_status !== "failed") {
-          return prev
-        }
-
-        const newClientMessageId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-
-        const nextMessages = [...messages]
-        nextMessages[targetIndex] = {
-          ...target,
-          id: newClientMessageId,
-          client_message_id: newClientMessageId,
-          delivery_status: "sending",
-          error_message: undefined,
-        }
-        next[peerId] = nextMessages
-
-        delete serverMessagePeerRef.current[target.id]
-
-        if (target.group_id || target.to_user_id.startsWith("group:")) {
-          const nextGroupId = target.group_id || target.to_user_id.replace(/^group:/, "")
-          eventToSend = {
-            type: "send_group_message",
-            group_id: nextGroupId,
-            text: target.text,
-            image_data_url: target.image_data_url,
-            client_message_id: newClientMessageId,
-          }
-        } else {
-          if (!canMessagePeer(target.to_user_id, acceptedFriends)) {
-            return prev
-          }
-
-          eventToSend = {
-            type: "send_message",
-            to_user_id: target.to_user_id,
-            text: target.text,
-            image_data_url: target.image_data_url,
-            client_message_id: newClientMessageId,
-          }
-        }
-        retried = true
-        retryQueueKey = newClientMessageId
-        retryClientMessageId = newClientMessageId
-
-        return next
+      const plan = planFailedMessageRetry(
+        prev,
+        userId,
+        normalizedMessageId,
+        acceptedFriends,
+        newClientMessageId,
+      )
+      if (!plan) {
+        return prev
       }
 
-      return prev
+      eventToSend = plan.event
+      retryQueueKey = plan.retryQueueKey
+      retryClientMessageId = plan.retryClientMessageId
+      return applyStatusUpdate({
+        messagesByPeer: plan.messagesByPeer,
+        peerMapUpdates: {},
+        peerMapDeletes: plan.peerMapDeletes,
+        changed: true,
+      })
     })
 
-    if (!retried || !eventToSend) {
+    if (!eventToSend) {
       return false
     }
 
@@ -1337,9 +912,8 @@ export function useChatSocket({
     if (retryClientMessageId) {
       schedulePendingSendTimeout(retryQueueKey, retryClientMessageId)
     }
-
     return true
-  }, [schedulePendingSendTimeout, sendEvent, userId, acceptedFriends])
+  }, [acceptedFriends, applyStatusUpdate, schedulePendingSendTimeout, sendEvent, userId])
 
   const deleteMessage = useCallback((messageId: string) => {
     const normalizedMessageId = messageId.trim()
@@ -1418,46 +992,25 @@ export function useChatSocket({
 
     void (async () => {
       try {
-        if (typeof window === "undefined" || !("indexedDB" in window)) {
+        const saved = await readHistory(userId)
+        if (!saved) {
           return
         }
 
-        const db = await openHistoryDb()
-        const tx = db.transaction(CHAT_HISTORY_STORE_NAME, "readwrite")
-        const store = tx.objectStore(CHAT_HISTORY_STORE_NAME)
-        const getRequest = store.get(userId)
-
-        getRequest.onsuccess = () => {
-          const record = getRequest.result as
-            | { userId: string; messagesByPeer: Record<string, ChatMessage[]> }
-            | undefined
-
-          if (record) {
-            const nextByPeer = { ...record.messagesByPeer }
-
-            for (const key of Object.keys(nextByPeer)) {
-              if (key.trim().toLowerCase() === normalizedPeerId) {
-                delete nextByPeer[key]
-                break
-              }
-            }
-
-            store.put({
-              userId,
-              messagesByPeer: nextByPeer,
-              updatedAt: Date.now(),
-            })
+        const nextByPeer = { ...saved }
+        for (const key of Object.keys(nextByPeer)) {
+          if (key.trim().toLowerCase() === normalizedPeerId) {
+            delete nextByPeer[key]
+            break
           }
         }
 
-        tx.oncomplete = () => {
-          db.close()
-        }
+        await writeHistory(userId, nextByPeer)
       } catch {
         // Ignore IndexedDB errors
       }
     })()
-  }, [clearPendingSendTimeout, userId, openHistoryDb])
+  }, [clearPendingSendTimeout, userId])
 
   useEffect(() => {
     return () => {
